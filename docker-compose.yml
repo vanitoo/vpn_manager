@@ -1,0 +1,10 @@
+services:
+  kamenevabook-bot:
+    build: .
+    container_name: kamenevabook-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./books:/app/books
+      - ./data:/app/data
