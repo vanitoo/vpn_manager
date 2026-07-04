@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from datetime import date
-
-APP_NAME = "KamenevaBook Bot"
-APP_VERSION = "3.3.1"
-BUILD_DATE = "2026-06-26"
+APP_NAME = "Remnawave VPN Bot"
+APP_VERSION = "0.1.0"
+BUILD_DATE = "2026-07-05"
 
 # Version of the SQLite database structure expected by this application.
-# Increase this number when migrations add/change tables, columns or indexes.
-DB_SCHEMA_VERSION = 8
+DB_SCHEMA_VERSION = 1
 
 
 def version_line() -> str:
