@@ -2,4 +2,7 @@ from app.boot import main
 
 if __name__ == '__main__':
     import asyncio
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print('Bot stopped cleanly.')
