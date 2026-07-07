@@ -16,6 +16,7 @@ from app import runtime
 from app.admin_remna_handlers import router as admin_remna_router
 from app.config import get_settings
 from app.proxy_manager import ProxyManager
+from app.user_vpn_handlers import router as user_vpn_router
 
 log = logging.getLogger(__name__)
 proxy_manager: ProxyManager | None = None
@@ -86,6 +87,7 @@ async def main() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
+    dp.include_router(user_vpn_router)
     dp.include_router(admin_remna_router)
     dp.include_router(runtime.router)
 
