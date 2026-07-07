@@ -71,7 +71,8 @@ def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='📊 Дашборд', callback_data='admin:dashboard')],
         [InlineKeyboardButton(text='👥 Пользователи', callback_data='admin:users'), InlineKeyboardButton(text='💰 Тарифы', callback_data='admin:plans')],
-        [InlineKeyboardButton(text='🖥 Ноды', callback_data='admin:nodes'), InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs')],
+        [InlineKeyboardButton(text='🖥 Ноды', callback_data='admin:nodes'), InlineKeyboardButton(text='🧩 Squads', callback_data='admin:squads')],
+        [InlineKeyboardButton(text='📣 Рассылки', callback_data='admin:mailing'), InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs')],
         [InlineKeyboardButton(text='🌍 Remnawave', callback_data='admin:remna'), InlineKeyboardButton(text='ℹ️ Система', callback_data='admin:system')],
     ])
 
@@ -91,6 +92,31 @@ def admin_nodes_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text='🩺 Проверка доступности', callback_data='admin:nodes:health')],
         [InlineKeyboardButton(text='🧭 Идея управления нодами', callback_data='admin:nodes:roadmap')],
         [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
+    ])
+
+
+def admin_squads_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='📊 Статистика по squads', callback_data='admin:squads:stats')],
+        [InlineKeyboardButton(text='📋 Список squads', callback_data='admin:squads:list')],
+        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
+    ])
+
+
+def admin_mailing_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='⚙️ Правила напоминаний', callback_data='admin:mailing:rules')],
+        [InlineKeyboardButton(text='📊 Статистика рассылок', callback_data='admin:mailing:stats')],
+        [InlineKeyboardButton(text='🧪 Dry-run ближайших уведомлений', callback_data='admin:mailing:dryrun')],
+        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
+    ])
+
+
+def reminder_rule_menu(code: str, enabled: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='⛔ Выключить' if enabled else '✅ Включить', callback_data=f'admin:mailing:toggle:{code}')],
+        [InlineKeyboardButton(text='✏️ Изменить текст', callback_data=f'admin:mailing:edit:{code}')],
+        [InlineKeyboardButton(text='← Правила', callback_data='admin:mailing:rules')],
     ])
 
 
