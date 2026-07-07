@@ -12,6 +12,8 @@ import aiohttp
 
 from app.config import Settings
 
+log = logging.getLogger(__name__)
+
 
 @dataclass
 class RemnawaveAccess:
@@ -23,29 +25,20 @@ class RemnawaveAccess:
 class RemnawaveClient:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.last_error: str = ''
 
     @property
     def is_configured(self) -> bool:
-        return bool(
-            self.settings.remnawave_base_url
-            and self.settings.remnawave_api_token
-            and getattr(self.settings, 'remnawave_internal_squad_uuid', '')
-        )
+        return bool(self.settings.remnawave_base_url and self.settings.remnawave_api_token)
 
     def _headers(self) -> dict[str, str]:
-        return {
-            'Authorization': f'Bearer {self.settings.remnawave_api_token}',
-            'Content-Type': 'application/json',
-        }
+        return {'Authorization': f'Bearer {self.settings.remnawave_api_token}', 'Content-Type': 'application/json'}
 
     def _fallback_access(self, telegram_id: int) -> RemnawaveAccess:
         local_id = f"tg-{telegram_id}-{uuid.uuid4().hex[:8]}"
         base = self.settings.remnawave_subscription_base_url or 'https://example.com/sub'
-        return RemnawaveAccess(
-            remnawave_user_id=local_id,
-            subscription_url=f"{base}/{local_id}",
-            raw={'mode': 'local_stub'},
-        )
+        log.warning('Remnawave stub access issued for telegram_id=%s', telegram_id)
+        return RemnawaveAccess(local_id, f"{base}/{local_id}", {'mode': 'local_stub'})
 
     @staticmethod
     def _to_iso(dt: datetime) -> str:
@@ -65,29 +58,72 @@ class RemnawaveClient:
     def _email_for_user(telegram_id: int) -> str:
         return f'tg{telegram_id}@bot.local'
 
-    async def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        json_payload: dict[str, Any] | None = None,
-        expected_status: tuple[int, ...] = (200,),
-    ) -> tuple[int, dict[str, Any]]:
+    async def _request(self, method: str, path: str, *, json_payload: dict[str, Any] | None = None, expected_status: tuple[int, ...] = (200,)) -> tuple[int, dict[str, Any]]:
+        if not self.settings.remnawave_base_url:
+            raise RuntimeError('REMNAWAVE_BASE_URL is empty')
         url = f"{self.settings.remnawave_base_url}{path}"
+        safe_payload = json_payload.copy() if isinstance(json_payload, dict) else None
+        log.info('Remnawave request: %s %s payload=%s', method, path, safe_payload)
         async with aiohttp.ClientSession(headers=self._headers()) as session:
             async with session.request(method, url, json=json_payload, timeout=30) as resp:
+                text = await resp.text()
                 try:
                     data = await resp.json(content_type=None)
                 except Exception:
-                    data = {'raw': await resp.text()}
+                    data = {'raw': text[:1000]}
+                log.info('Remnawave response: %s %s -> HTTP %s body=%s', method, path, resp.status, str(data)[:1200])
                 if resp.status not in expected_status:
-                    raise RuntimeError(f'Remnawave API {method} {path} error {resp.status}: {data}')
+                    raise RuntimeError(f'Remnawave API {method} {path} HTTP {resp.status}: {data}')
                 return resp.status, data if isinstance(data, dict) else {'response': data}
 
     @staticmethod
-    def _unwrap(data: dict[str, Any]) -> dict[str, Any]:
-        response = data.get('response')
-        return response if isinstance(response, dict) else data
+    def _unwrap(data: dict[str, Any]) -> Any:
+        return data.get('response') if isinstance(data, dict) and 'response' in data else data
+
+    async def diagnostics(self) -> str:
+        if not self.settings.remnawave_base_url:
+            return 'REMNAWAVE_BASE_URL пустой'
+        if not self.settings.remnawave_api_token:
+            return 'REMNAWAVE_API_TOKEN пустой'
+        checks = []
+        for path in ['/api/auth/session', '/api/internal-squads', '/api/users?page=0&size=1', '/api/nodes']:
+            try:
+                await self._request('GET', path, expected_status=(200, 404))
+                checks.append(f'✅ {path}')
+            except Exception as exc:
+                checks.append(f'❌ {path}: {type(exc).__name__}: {exc}')
+        squad = await self.resolve_internal_squad_uuid()
+        checks.append(f"Squad: {squad or 'не найден'}")
+        return '\n'.join(checks)
+
+    async def list_internal_squads(self) -> list[dict[str, Any]]:
+        candidates = ['/api/internal-squads', '/api/internal-squads/all', '/api/squads', '/api/squads/internal']
+        for path in candidates:
+            try:
+                _, data = await self._request('GET', path, expected_status=(200, 404))
+                payload = self._unwrap(data)
+                if isinstance(payload, dict):
+                    items = payload.get('internalSquads') or payload.get('squads') or payload.get('data') or payload.get('items') or []
+                else:
+                    items = payload
+                if isinstance(items, list) and items:
+                    log.info('Remnawave squads discovered via %s: %s', path, items)
+                    return [x for x in items if isinstance(x, dict)]
+            except Exception as exc:
+                log.warning('Squad discovery failed for %s: %s', path, exc)
+        return []
+
+    async def resolve_internal_squad_uuid(self) -> str:
+        manual = getattr(self.settings, 'remnawave_internal_squad_uuid', '')
+        if manual:
+            return manual
+        squads = await self.list_internal_squads()
+        for item in squads:
+            value = item.get('uuid') or item.get('id') or item.get('squadUuid')
+            if value:
+                log.info('Auto-selected Remnawave internal squad: %s (%s)', value, item.get('name') or item.get('title') or '')
+                return str(value)
+        return ''
 
     async def _get_user_by_email(self, email: str) -> dict[str, Any] | None:
         status, data = await self._request('GET', f'/api/users/by-email/{quote(email)}', expected_status=(200, 404))
@@ -108,41 +144,30 @@ class RemnawaveClient:
             return f"{self.settings.remnawave_subscription_base_url}/{user_uuid}"
         return ''
 
-    async def create_or_extend_user(
-        self,
-        *,
-        telegram_id: int,
-        username: str | None,
-        duration_days: int,
-        traffic_gb: int,
-    ) -> RemnawaveAccess:
+    async def create_or_extend_user(self, *, telegram_id: int, username: str | None, duration_days: int, traffic_gb: int) -> RemnawaveAccess:
         if not self.is_configured:
-            logging.warning('Remnawave is not fully configured, returning stub access for telegram_id=%s', telegram_id)
+            self.last_error = 'Remnawave base URL or token is not configured'
+            log.warning(self.last_error)
+            return self._fallback_access(telegram_id)
+        squad_uuid = await self.resolve_internal_squad_uuid()
+        if not squad_uuid:
+            self.last_error = 'Internal squad UUID not found. Fill REMNAWAVE_INTERNAL_SQUAD_UUID or check API access.'
+            log.error(self.last_error)
             return self._fallback_access(telegram_id)
 
         email = self._email_for_user(telegram_id)
         current = await self._get_user_by_email(email)
-        requested_expire = datetime.now(timezone.utc) + timedelta(days=duration_days)
-        expire_at = requested_expire
-
+        expire_at = datetime.now(timezone.utc) + timedelta(days=duration_days)
         if current and current.get('expireAt'):
             try:
                 current_expire = datetime.fromisoformat(str(current['expireAt']).replace('Z', '+00:00'))
                 if current_expire > datetime.now(timezone.utc):
                     expire_at = current_expire + timedelta(days=duration_days)
             except ValueError:
-                pass
+                log.warning('Cannot parse current expireAt: %s', current.get('expireAt'))
 
         traffic_limit_bytes = int(traffic_gb) * 1024 * 1024 * 1024 if int(traffic_gb or 0) > 0 else None
-        payload: dict[str, Any] = {
-            'status': 'ACTIVE',
-            'expireAt': self._to_iso(expire_at),
-            'activeInternalSquads': [self.settings.remnawave_internal_squad_uuid],
-            'email': email,
-            'telegramId': int(telegram_id),
-            'description': f'Telegram VPN bot user {telegram_id}',
-            'trafficLimitStrategy': 'NO_RESET',
-        }
+        payload: dict[str, Any] = {'status': 'ACTIVE', 'expireAt': self._to_iso(expire_at), 'activeInternalSquads': [squad_uuid], 'email': email, 'telegramId': int(telegram_id), 'description': f'Telegram VPN bot user {telegram_id}', 'trafficLimitStrategy': 'NO_RESET'}
         if traffic_limit_bytes is not None:
             payload['trafficLimitBytes'] = traffic_limit_bytes
         if getattr(self.settings, 'remnawave_hwid_device_limit', 0) > 0:
@@ -160,6 +185,9 @@ class RemnawaveClient:
 
         _, data = await self._request(method, '/api/users', json_payload=payload, expected_status=(200, 201))
         user = self._unwrap(data)
+        if not isinstance(user, dict):
+            raise RuntimeError(f'Remnawave returned unexpected user payload: {data}')
         remnawave_user_id = str(user.get('uuid') or user.get('id') or '')
         subscription_url = self._subscription_url(user)
+        log.info('Remnawave user ready: telegram_id=%s uuid=%s subscription_url=%s', telegram_id, remnawave_user_id, subscription_url)
         return RemnawaveAccess(remnawave_user_id=remnawave_user_id, subscription_url=subscription_url, raw=user)
