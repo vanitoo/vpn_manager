@@ -68,6 +68,11 @@ class Settings:
     remnawave_subscription_base_url: str
     remnawave_default_traffic_gb: int
     remnawave_hwid_device_limit: int
+    remnawave_nginx_auth_enabled: bool
+    remnawave_nginx_cookie_name: str
+    remnawave_nginx_cookie_value: str
+    remnawave_nginx_basic_login: str
+    remnawave_nginx_basic_password: str
     pending_payment_ttl_minutes: int
     admin_notify_purchases: bool
     log_level: str
@@ -138,6 +143,11 @@ def get_settings() -> Settings:
         remnawave_subscription_base_url=os.getenv('REMNAWAVE_SUBSCRIPTION_BASE_URL', '').strip().rstrip('/'),
         remnawave_default_traffic_gb=int(os.getenv('REMNAWAVE_DEFAULT_TRAFFIC_GB', '0')),
         remnawave_hwid_device_limit=int(os.getenv('REMNAWAVE_HWID_DEVICE_LIMIT', '0')),
+        remnawave_nginx_auth_enabled=_bool(os.getenv('REMNAWAVE_NGINX_AUTH_ENABLED'), False),
+        remnawave_nginx_cookie_name=os.getenv('REMNAWAVE_NGINX_COOKIE_NAME', '').strip(),
+        remnawave_nginx_cookie_value=os.getenv('REMNAWAVE_NGINX_COOKIE_VALUE', '').strip(),
+        remnawave_nginx_basic_login=os.getenv('REMNAWAVE_NGINX_BASIC_LOGIN', '').strip(),
+        remnawave_nginx_basic_password=os.getenv('REMNAWAVE_NGINX_BASIC_PASSWORD', '').strip(),
         pending_payment_ttl_minutes=int(os.getenv('PENDING_PAYMENT_TTL_MINUTES', '60')),
         admin_notify_purchases=_bool(os.getenv('ADMIN_NOTIFY_PURCHASES'), True),
         log_level=os.getenv('LOG_LEVEL', 'INFO').strip().upper(),
