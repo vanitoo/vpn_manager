@@ -53,7 +53,6 @@ def after_purchase_menu() -> InlineKeyboardMarkup:
 
 def my_vpn_menu(*, subscription_url: str = '', happ_url: str = '') -> InlineKeyboardMarkup:
     rows = []
-    # Telegram не разрешает happ:// в inline URL-кнопках, поэтому Happ-ссылка выводится текстом в сообщении.
     if subscription_url:
         rows.append([InlineKeyboardButton(text='🌐 Открыть страницу подписки', url=subscription_url)])
     rows.append([InlineKeyboardButton(text='Продлить', callback_data='plans')])
@@ -100,8 +99,13 @@ def admin_user_menu(telegram_id: int, is_active: bool) -> InlineKeyboardMarkup:
 
 
 def admin_plans_menu(plans: list[dict]) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=f"{'🟢' if p['is_active'] else '⚪'} {p['title']} · {p['price_rub']} ₽", callback_data=f"admin:plan:{p['id']}")] for p in plans]
-    rows.append([InlineKeyboardButton(text='➕ Новый тариф', callback_data='admin:planadd')])
+    rows = []
+    for p in plans:
+        public = int(p.get('is_public', 1))
+        badge = '🛒' if public else '🔒'
+        rows.append([InlineKeyboardButton(text=f"{badge} {'🟢' if p['is_active'] else '⚪'} {p['title']} · {p['price_rub']} ₽", callback_data=f"admin:plan:{p['id']}")])
+    rows.append([InlineKeyboardButton(text='➕ Новый публичный', callback_data='admin:planadd')])
+    rows.append([InlineKeyboardButton(text='🔒 Новый служебный', callback_data='admin:planadd_service')])
     rows.append([InlineKeyboardButton(text='← Админка', callback_data='admin:home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
