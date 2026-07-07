@@ -69,9 +69,38 @@ def support_menu() -> InlineKeyboardMarkup:
 
 def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='📊 Дашборд', callback_data='admin:dashboard')],
         [InlineKeyboardButton(text='👥 Пользователи', callback_data='admin:users'), InlineKeyboardButton(text='💰 Тарифы', callback_data='admin:plans')],
+        [InlineKeyboardButton(text='🖥 Ноды', callback_data='admin:nodes'), InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs')],
         [InlineKeyboardButton(text='🌍 Remnawave', callback_data='admin:remna'), InlineKeyboardButton(text='ℹ️ Система', callback_data='admin:system')],
-        [InlineKeyboardButton(text='📊 Статистика', callback_data='admin:stats')],
+    ])
+
+
+def admin_logs_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='📄 Последние 50 строк', callback_data='admin:logs:tail')],
+        [InlineKeyboardButton(text='⚠️ Ошибки', callback_data='admin:logs:errors')],
+        [InlineKeyboardButton(text='🧹 Размеры логов', callback_data='admin:logs:size')],
+        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
+    ])
+
+
+def admin_nodes_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='🖥 Список нод', callback_data='admin:nodes:list')],
+        [InlineKeyboardButton(text='🩺 Проверка доступности', callback_data='admin:nodes:health')],
+        [InlineKeyboardButton(text='🧭 Идея управления нодами', callback_data='admin:nodes:roadmap')],
+        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
+    ])
+
+
+def node_manage_menu(node_key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='🔄 Проверить', callback_data=f'admin:node:check:{node_key}')],
+        [InlineKeyboardButton(text='♻️ Reboot node', callback_data=f'admin:node:reboot:{node_key}')],
+        [InlineKeyboardButton(text='⬆️ Update remnanode', callback_data=f'admin:node:update:{node_key}')],
+        [InlineKeyboardButton(text='🔗 Connect remnanode', callback_data=f'admin:node:connect:{node_key}')],
+        [InlineKeyboardButton(text='← Ноды', callback_data='admin:nodes')],
     ])
 
 
