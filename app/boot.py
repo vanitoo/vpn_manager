@@ -6,19 +6,18 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from aiogram import BaseMiddleware, Bot, Dispatcher, Router, F
+from aiogram import BaseMiddleware, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault, CallbackQuery, TelegramObject
 
 from app import runtime
+from app.admin_remna_handlers import router as admin_remna_router
 from app.config import get_settings
 from app.proxy_manager import ProxyManager
-from app.remnawave import RemnawaveClient
 
 log = logging.getLogger(__name__)
-extra_router = Router()
 proxy_manager: ProxyManager | None = None
 
 
@@ -41,12 +40,7 @@ def setup_logging() -> None:
     console = logging.StreamHandler()
     console.setFormatter(fmt)
     root.addHandler(console)
-    file_handler = RotatingFileHandler(
-        runtime.settings.log_file,
-        maxBytes=runtime.settings.log_max_bytes,
-        backupCount=runtime.settings.log_backup_count,
-        encoding='utf-8',
-    )
+    file_handler = RotatingFileHandler(runtime.settings.log_file, maxBytes=runtime.settings.log_max_bytes, backupCount=runtime.settings.log_backup_count, encoding='utf-8')
     file_handler.setFormatter(fmt)
     root.addHandler(file_handler)
     logging.getLogger('aiogram').setLevel(logging.INFO)
@@ -54,27 +48,16 @@ def setup_logging() -> None:
 
 
 async def setup_commands(bot: Bot) -> None:
-    public = [
-        BotCommand(command='start', description='Главное меню'),
-        BotCommand(command='plans', description='Тарифы'),
-        BotCommand(command='vpn', description='Мой VPN'),
-        BotCommand(command='id', description='Мой Telegram ID'),
-    ]
+    public = [BotCommand(command='start', description='Главное меню')]
     await bot.set_my_commands(public, scope=BotCommandScopeDefault())
     for admin_id in runtime.settings.admin_ids:
         await bot.set_my_commands(public + [BotCommand(command='admin', description='Админка')], scope=BotCommandScopeChat(chat_id=admin_id))
-    log.info('Telegram commands registered. Admin IDs: %s', runtime.settings.admin_ids)
+    log.info('Minimal Telegram commands registered. Admin IDs: %s', runtime.settings.admin_ids)
 
 
 async def make_bot() -> Bot:
     global proxy_manager
-    proxy_manager = ProxyManager.from_env_string(
-        runtime.settings.proxy,
-        mode=runtime.settings.proxy_mode,
-        healthcheck_url=runtime.settings.proxy_healthcheck_url,
-        healthcheck_timeout=runtime.settings.proxy_healthcheck_timeout,
-        healthcheck_interval=runtime.settings.proxy_healthcheck_interval,
-    )
+    proxy_manager = ProxyManager.from_env_string(runtime.settings.proxy, mode=runtime.settings.proxy_mode, healthcheck_url=runtime.settings.proxy_healthcheck_url, healthcheck_timeout=runtime.settings.proxy_healthcheck_timeout, healthcheck_interval=runtime.settings.proxy_healthcheck_interval)
     log.info('Proxy mode=%s has_proxies=%s', runtime.settings.proxy_mode, proxy_manager.has_proxies)
     if proxy_manager.has_proxies:
         await proxy_manager.check_all()
@@ -85,24 +68,6 @@ async def make_bot() -> Bot:
         return Bot(runtime.settings.bot_token, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     log.info('Telegram API session: direct')
     return Bot(runtime.settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-
-
-@extra_router.callback_query(F.data == 'servers')
-async def user_servers(callback: CallbackQuery) -> None:
-    await callback.answer('Проверяю')
-    client = RemnawaveClient(runtime.settings)
-    diag = await client.diagnostics() if client.is_configured else 'REMNAWAVE_BASE_URL или REMNAWAVE_API_TOKEN не заполнены'
-    await callback.message.answer('🌍 <b>Remnawave</b>\n\n<code>' + diag.replace('<', '&lt;')[:3500] + '</code>')
-
-
-@extra_router.callback_query(F.data == 'admin:servers')
-async def admin_servers(callback: CallbackQuery) -> None:
-    if not runtime.admin(callback):
-        await callback.answer('Нет доступа', show_alert=True)
-        return
-    await callback.answer('Проверяю')
-    diag = await RemnawaveClient(runtime.settings).diagnostics()
-    await callback.message.answer('🌍 <b>Remnawave диагностика</b>\n\n<code>' + diag.replace('<', '&lt;')[:3500] + '</code>')
 
 
 async def main() -> None:
@@ -121,7 +86,7 @@ async def main() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
-    dp.include_router(extra_router)
+    dp.include_router(admin_remna_router)
     dp.include_router(runtime.router)
 
     try:
