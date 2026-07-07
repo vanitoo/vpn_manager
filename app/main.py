@@ -1,4 +1,4 @@
-from app.runtime import main
+from app.boot import main
 
 if __name__ == '__main__':
     import asyncio
