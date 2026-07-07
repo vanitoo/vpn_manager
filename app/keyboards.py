@@ -53,10 +53,9 @@ def after_purchase_menu() -> InlineKeyboardMarkup:
 
 def my_vpn_menu(*, subscription_url: str = '', happ_url: str = '') -> InlineKeyboardMarkup:
     rows = []
-    if happ_url:
-        rows.append([InlineKeyboardButton(text='⚡ Открыть в Happ', url=happ_url)])
+    # Telegram не разрешает happ:// в inline URL-кнопках, поэтому Happ-ссылка выводится текстом в сообщении.
     if subscription_url:
-        rows.append([InlineKeyboardButton(text='🌐 Страница подписки', url=subscription_url)])
+        rows.append([InlineKeyboardButton(text='🌐 Открыть страницу подписки', url=subscription_url)])
     rows.append([InlineKeyboardButton(text='Продлить', callback_data='plans')])
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
