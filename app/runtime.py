@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import math
 import re
-from datetime import datetime
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -19,10 +18,12 @@ from app.admin_db import add_plan, find_user, has_used_trial, init_admin_tables,
 from app.config import get_settings
 from app.db import add_payment, add_subscription, get_active_subscription, get_plan_by_id, get_stats, init_db, list_plans, seed_plans, upsert_user
 from app.keyboards import admin_menu, admin_plan_menu, admin_plans_menu, admin_user_menu, admin_users_menu, after_purchase_menu, main_menu, my_vpn_menu, payment_methods_menu, plan_menu, plans_menu
+from app.proxy_manager import ProxyManager
 from app.remnawave import RemnawaveClient
 
 router = Router()
 settings = None
+proxy_manager: ProxyManager | None = None
 TRIAL_DAYS = 1
 DEFAULT_PLANS = [
  {'slug':'month','title':'1 месяц','description':'Доступ VPN на 30 дней.','duration_days':30,'traffic_gb':0,'price_rub':199,'sort_order':10},
@@ -33,6 +34,16 @@ class Form(StatesGroup):
 def stars(v:int)->int:return max(1,math.ceil(v/max(settings.stars_rub_per_star,0.01)))
 def admin(x):return bool(x.from_user and x.from_user.id in settings.admin_ids)
 async def user(x):return await upsert_user(settings.db_path,telegram_id=x.from_user.id,username=x.from_user.username,full_name=x.from_user.full_name)
+async def make_bot()->Bot:
+ global proxy_manager
+ proxy_manager=ProxyManager.from_env_string(settings.proxy,mode=settings.proxy_mode,healthcheck_url=settings.proxy_healthcheck_url,healthcheck_timeout=settings.proxy_healthcheck_timeout,healthcheck_interval=settings.proxy_healthcheck_interval)
+ if proxy_manager.has_proxies:
+  await proxy_manager.check_all()
+ session=proxy_manager.get_session() or proxy_manager.get_session_sync()
+ if session:
+  await proxy_manager.start_healthcheck_loop()
+  return Bot(settings.bot_token,session=session,default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+ return Bot(settings.bot_token,default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 async def provision(u:dict,tid:int,p:dict,trial=False):
  a=await RemnawaveClient(settings).create_or_extend_user(telegram_id=tid,username=u.get('username'),duration_days=int(p['duration_days']),traffic_gb=int(p.get('traffic_gb') or 0))
  sid=await add_subscription(settings.db_path,user_id=int(u['id']),telegram_id=tid,plan_id=int(p['id']),duration_days=int(p['duration_days']),traffic_limit_gb=int(p.get('traffic_gb') or 0),remnawave_user_id=a.remnawave_user_id,subscription_url=a.subscription_url)
@@ -124,6 +135,11 @@ async def nd(m:Message,state:FSMContext):
 async def main():
  global settings
  settings=get_settings();Path(settings.log_file).parent.mkdir(parents=True,exist_ok=True);await init_db(settings.db_path);await init_admin_tables(settings.db_path);await seed_plans(settings.db_path,DEFAULT_PLANS)
- bot=Bot(settings.bot_token,default=DefaultBotProperties(parse_mode=ParseMode.HTML));dp=Dispatcher(storage=MemoryStorage());dp.include_router(router)
- await bot.delete_webhook(drop_pending_updates=settings.drop_pending_updates);await dp.start_polling(bot)
+ bot=await make_bot();dp=Dispatcher(storage=MemoryStorage());dp.include_router(router)
+ try:
+  if settings.delete_webhook_on_start:await bot.delete_webhook(drop_pending_updates=settings.drop_pending_updates)
+  await dp.start_polling(bot)
+ finally:
+  if proxy_manager:await proxy_manager.close()
+  await bot.session.close()
 if __name__=='__main__':asyncio.run(main())
