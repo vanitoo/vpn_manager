@@ -131,7 +131,7 @@ async def nt(m:Message,state:FSMContext):await state.update_data(title=m.text or
 async def np(m:Message,state:FSMContext):await state.update_data(price=int(m.text or '0'));await state.set_state(Form.new_days);await m.answer('Дней?')
 @router.message(Form.new_days)
 async def nd(m:Message,state:FSMContext):
- d=await state.get_data();days=int(m.text or '0');slug=re.sub('[^a-z0-9]+','-',f"plan-{days}-{d['price']}").strip('-');await add_plan(settings.db_path,slug=slug,title=d['title'],description='',duration_days=days,price_rub=d['price']);await state.clear();await m.answer('✅ Тариф создан.')
+ d=await state.get_data();days=int(m.text or '0');slug=re.sub('[^a-z0-9]+','-',f"plan-{days}-{d['price']}").strip('-');plan_id=await add_plan(settings.db_path,slug=slug,title=d['title'],description='',duration_days=days,price_rub=d['price']);await state.clear();await m.answer(f"✅ <b>Тариф создан</b>\n\nID: <code>{plan_id}</code>\nНазвание: <b>{d['title']}</b>\nЦена: <b>{d['price']} ₽</b>\nСрок: <b>{days} дн.</b>\nПоказ в продаже: <b>да</b>",reply_markup=admin_plan_menu(plan_id,True))
 async def main():
  global settings
  settings=get_settings();Path(settings.log_file).parent.mkdir(parents=True,exist_ok=True);await init_db(settings.db_path);await init_admin_tables(settings.db_path);await seed_plans(settings.db_path,DEFAULT_PLANS)
