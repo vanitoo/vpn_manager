@@ -36,7 +36,6 @@ class Settings:
     bot_token: str
     admin_ids: list[int]
     db_path: str
-
     proxy_mode: str
     proxy: str | None
     proxy_healthcheck_url: str
@@ -44,17 +43,14 @@ class Settings:
     proxy_healthcheck_interval: float
     delete_webhook_on_start: bool
     drop_pending_updates: bool
-
     seed_plans_on_start: bool
     stars_rub_per_star: float
     payment_providers: list[str]
-
     yookassa_enabled: bool
     yookassa_shop_id: str
     yookassa_secret_key: str
     yookassa_return_url: str
     yookassa_test_mode: bool
-
     lava_enabled: bool
     lava_shop_id: str
     lava_api_key: str
@@ -62,19 +58,18 @@ class Settings:
     platega_enabled: bool
     platega_merchant_id: str
     platega_api_key: str
-
     receipt_require_contact: bool
     receipt_fallback_email: str
     receipt_save_contact: bool
-
     remnawave_base_url: str
     remnawave_api_token: str
+    remnawave_internal_squad_uuid: str
+    remnawave_external_squad_uuid: str
     remnawave_subscription_base_url: str
     remnawave_default_traffic_gb: int
-
+    remnawave_hwid_device_limit: int
     pending_payment_ttl_minutes: int
     admin_notify_purchases: bool
-
     log_level: str
     log_file: str
     log_max_bytes: int
@@ -102,8 +97,7 @@ def get_settings() -> Settings:
         provider_flags.append('platega')
 
     payment_providers = explicit_providers or provider_flags or ['stars']
-    allowed = {'stars', 'yookassa', 'lava', 'platega'}
-    payment_providers = [p for p in payment_providers if p in allowed] or ['stars']
+    payment_providers = [p for p in payment_providers if p in {'stars', 'yookassa', 'lava', 'platega'}] or ['stars']
 
     proxy = os.getenv('PROXY', '').strip() or None
     proxy_mode = os.getenv('PROXY_MODE', '').strip().lower() or ('failover' if proxy else 'off')
@@ -139,8 +133,11 @@ def get_settings() -> Settings:
         receipt_save_contact=_bool(os.getenv('RECEIPT_SAVE_CONTACT'), True),
         remnawave_base_url=os.getenv('REMNAWAVE_BASE_URL', '').strip().rstrip('/'),
         remnawave_api_token=os.getenv('REMNAWAVE_API_TOKEN', '').strip(),
+        remnawave_internal_squad_uuid=os.getenv('REMNAWAVE_INTERNAL_SQUAD_UUID', '').strip(),
+        remnawave_external_squad_uuid=os.getenv('REMNAWAVE_EXTERNAL_SQUAD_UUID', '').strip(),
         remnawave_subscription_base_url=os.getenv('REMNAWAVE_SUBSCRIPTION_BASE_URL', '').strip().rstrip('/'),
         remnawave_default_traffic_gb=int(os.getenv('REMNAWAVE_DEFAULT_TRAFFIC_GB', '0')),
+        remnawave_hwid_device_limit=int(os.getenv('REMNAWAVE_HWID_DEVICE_LIMIT', '0')),
         pending_payment_ttl_minutes=int(os.getenv('PENDING_PAYMENT_TTL_MINUTES', '60')),
         admin_notify_purchases=_bool(os.getenv('ADMIN_NOTIFY_PURCHASES'), True),
         log_level=os.getenv('LOG_LEVEL', 'INFO').strip().upper(),
