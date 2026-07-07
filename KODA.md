@@ -1,9 +1,9 @@
-# KamenevaBook Bot — KODA Context
+# Remnawave VPN Bot — KODA Context
 
 ## Обзор проекта
 
-**KamenevaBook Bot v2.1** — Telegram-бот для продажи электронных книг через Telegram Stars.
-Бот позволяет пользователям просматривать каталог книг, покупать их через встроенную оплату Telegram Stars и мгновенно получать файлы книг. Администраторы управляют книгами, статистикой и пользователями прямо через Telegram.
+**Remnawave VPN Bot v3.3.1** — Telegram-бот для продажи VPN-подписок с автоматической выдачей доступа через панель Remnawave.
+Бот управляет каталогом тарифов, обрабатывает платежи (Telegram Stars, ЮKassa, Lava, Platega) и взаимодействует с API Remnawave для создания пользователей и генерации ссылок на подключение.
 
 ## Основные технологии
 
@@ -13,6 +13,7 @@
 | Фреймворк бота | aiogram 3.x |
 | База данных | SQLite (aiosqlite) |
 | Конфигурация | `.env` через python-dotenv |
+| Интеграция VPN | Remnawave API 2.7.x |
 | Прокси | aiohttp-socks (failover-режим) |
 | Сборка/контейнер | Docker, docker-compose |
 
@@ -21,60 +22,61 @@
 ```
 .
 ├── app/
-│   ├── main.py              # Основной файл: бот, рутеры, FSM-сценарии админки
+│   ├── __init__.py          # Инициализация (runtime, DEFAULT_PLANS)
+│   ├── boot.py              # Точка входа: инициализация бота, логирование, запуск
 │   ├── config.py            # Настройки из .env (Settings dataclass)
-│   ├── db.py                # SQLite: схемы, миграции, CRUD книг/покупок
-│   ├── keyboards.py         # Inline-клавиатуры (меню бота и админки)
-│   └── proxy_manager.py     # Управление прокси-сессиями с healthcheck
-├── books/                   # Файлы книг (папки по slug)
-│   └── <slug>/
-│       ├── cover.jpg        # Обложка
-│       ├── description.md   # Описание книги
-│       ├── meta.json        # Метаданные
-│       └── <slug>.<ext>     # Файлы книги (PDF, EPUB, FB2, DOCX...)
-├── content/start/           # Стартовый текст и картинка бота
-│   ├── start.md
-│   └── start.jpg
+│   ├── db.py                # SQLite: схемы, миграции, CRUD (тарифы, подписки, платежи)
+│   ├── runtime.py           # Глобальное состояние инициализации
+│   ├── proxy_manager.py     # Управление прокси-сессиями
+│   ├── remnawave.py         # Клиент для API Remnawave
+│   ├── user_vpn_handlers.py # Обработчики для пользователей (тарифы, vpn, поддержка)
+│   └── admin_remna_handlers.py # Обработчики админки
 ├── data/
-│   └── bot.sqlite3          # База данных
-├── backups/                 # JSON-бэкапы пользователей и покупок
+│   └── vpn_bot.sqlite3      # База данных
 ├── logs/
-│   ├── bot.log              # Основной лог с ротацией
-│   └── purchases.log        # Лог покупок
+│   └── bot.log              # Лог с ротацией
 ├── docker-compose.yml       # Docker-сборка
 ├── Dockerfile               # Образ контейнера
 ├── requirements.txt         # Зависимости Python
-├── run.bat                  # Запуск Windows
+├── run.cmd                  # Запуск Windows (UTF-8 fix included)
 ├── run.sh                   # Запуск Linux
 └── .env.example             # Шаблон переменных окружения
 ```
 
 ## База данных
 
-**Schema version:** 5
+**Schema version:** хранится в `app_meta.db_schema_version`.
 
 Три таблицы:
 
 | Таблица | Назначение |
 |---------|-----------|
-| `books` | Каталог книг (slug, title, description, price_rub, price_stars, cover_path, file_paths, is_active, sort_order, created_at, updated_at) |
-| `purchases` | Покупки (user_id, username, full_name, book_id, payload, currency, total_amount, telegram_payment_charge_id, provider_payment_charge_id, created_at) |
-| `app_settings` | Настройки (key, value) — используется для welcome_text и welcome_image_path |
+| `plans` | Тарифы VPN (slug, title, duration_days, traffic_gb, price_rub, is_active, sort_order) |
+| `users` | Пользователи Telegram (telegram_id, username, full_name) |
+| `subscriptions` | Активные подписки (user_id, plan_id, status, expires_at, remnawave_user_id, subscription_url) |
+| `payments` | История платежей (provider, amount_rub, status, provider_payment_id, subscription_id) |
+| `receipt_contacts` | Контакты для чеков ЮKassa (email, phone) |
+| `app_settings` | Глобальные настройки бота |
+| `app_meta` | Метаданные (версия схемы) |
 
-**Миграции:** автоматические — при старте `init_db()` добавляет отсутствующие колонки через `ALTER TABLE ADD COLUMN`.
+**Особенности:**
+- Подписки продлеваются: новые дни добавляются к текущему сроку действия.
+- Автоматическая выдача доступа через Remnawave при успешной оплате.
 
 ## Сборка и запуск
 
-### Локальный запуск
+### Локальный запуск (Windows)
 
 ```bat
-run.bat
+run.cmd
 ```
 
-или
+### Локальный запуск (Linux/Mac)
 
 ```bash
 python -m app.main
+# или
+./run.sh
 ```
 
 ### Docker
@@ -85,144 +87,75 @@ docker compose up -d --build
 
 ### Переменные окружения (.env)
 
-| Переменная | Описание | Значение по умолчанию |
-|-----------|----------|----------------------|
-| `BOT_TOKEN` | Token бота от @BotFather | (обязательно) |
-| `ADMIN_IDS` | IDs администраторов через запятую | `319415227` |
-| `DATABASE_PATH` | Путь к SQLite-базе | `data/bot.sqlite3` |
-| `DELETE_WEBHOOK_ON_START` | Удалять вебхук при старте | `true` |
-| `DROP_PENDING_UPDATES` | Отбрасывать накопившиеся обновления | `false` |
-| `SEED_BOOKS_ON_START` | Инициализировать демо-книги при старте | `true` |
-| `STARS_RUB_PER_STAR` | Курс рублей к Stars | `1.70` |
-| `PROXY_MODE` | Режим прокси: `off`, `failover` | `failover` |
-| `PROXY` | URL прокси (socks5, http и т.д.) | — |
-| `PROXY_HEALTHCHECK_URL` | URL для проверки прокси | `https://api.telegram.org` |
-| `PROXY_HEALTHCHECK_TIMEOUT` | Таймаут healthcheck (сек) | `8` |
-| `PROXY_HEALTHCHECK_INTERVAL` | Интервал healthcheck (сек) | `60` |
-| `LOG_LEVEL` | Уровень логирования | `INFO` |
-| `LOG_FILE` | Путь к лог-файлу | `logs/bot.log` |
+**Основные:**
+| Переменная | Описание |
+|-----------|----------|
+| `BOT_TOKEN` | Токен бота от @BotFather |
+| `ADMIN_IDS` | ID администраторов (через запятую) |
+| `DB_PATH` | Путь к БД (`data/vpn_bot.sqlite3`) |
+| `PAYMENT_PROVIDERS` | Список провайдеров (`stars`, `yookassa`, `lava`, `platega`) |
+
+**Remnawave:**
+| Переменная | Описание |
+|-----------|----------|
+| `REMNAWAVE_BASE_URL` | URL панели (например, `https://pp.example.com`) |
+| `REMNAWAVE_API_TOKEN` | Токен API |
+| `REMNAWAVE_INTERNAL_SQUAD_UUID` | UUID внутренней группы (для доступа) |
+
+**Платежи:**
+| Переменная | Описание |
+|-----------|----------|
+| `STARS_RUB_PER_STAR` | Курс конвертации (по умолч. 1.70) |
+| `YOOKASSA_ENABLED` | Включить ЮKassa |
+| `YOOKASSA_SHOP_ID` | ID магазина |
+| `YOOKASSA_SECRET_KEY` | Секретный ключ |
 
 ## Формула цены
 
-Цена указывается в рублях (`price_rub`), бот автоматически пересчитывает в Telegram Stars:
-
-```
+Для Telegram Stars:
+```text
 stars = ceil(price_rub / STARS_RUB_PER_STAR)
 ```
-
-Пример: при `STARS_RUB_PER_STAR=1.70` книга за 299 ₽ = 176 ⭐.
 
 ## Команды бота
 
 | Команда | Описание | Доступ |
 |---------|----------|-------|
-| `/start` | Стартовое меню | Все |
-| `/books` | Открыть книжную полку | Все |
-| `/get` | Показать мои покупки | Все |
-| `/id` | Показать свой ID | Все |
-| `/admin` | Открыть админку | Только администраторы |
+| `/start` | Главное меню | Все |
+| `/plans` | Каталог тарифов | Все |
+| `/vpn` | Моя подписка (ссылка) | Все |
+| `/support` | Поддержка | Все |
+| `/id` | Показать ID | Все |
+| `/admin` | Админ-панель | Админы |
 
 ## Админка
 
-Разделы админки:
-
-- **Книги** — список всех книг, переключение вкл/выкл
-- **Добавить** — FSM-сценарий добавления книги (название → slug → описание → цена → файлы → обложка)
-- **Статистика** — общее количество книг, покупок, покупателей, выручка
-- **Продажи** — последние 30 продаж
-- **Покупатели** — список покупателей с суммами
-- **Продажи по книгам** — рейтинг книг по количеству продаж
-- **Бэкап / восстановление** — экспорт/импорт пользователей и покупок в JSON
-- **Старт бота** — настройка стартового текста и картинки
-
-### Включение/выключение книги
-
-- `is_active = 1` — книга видна в каталоге, доступна для покупки
-- `is_active = 0` — книга скрыта из каталога, купить нельзя, но остаётся в базе и админ видит
-
-### Порядок сортировки
-
-Поле `sort_order` — чем меньше число, тем выше книга в каталоге:
-
-| sort_order | Позиция |
-|-----------|--------|
-| 10 | Первая |
-| 20 | Вторая |
-| 30 | Третья |
-
-### Deep-link для книги
-
-```
-https://t.me/<bot_username>?start=book_<slug>
-```
-
-Переход по ссылке сразу открывает карточку конкретной книги.
-
-## Бэкап
-
-- Файлы: `backups/backup_YYYY-MM-DD_HH-MM-SS.json`
-- Содержит: пользователей, покупки, привязку к книгам (по `book_slug` и `book_id`)
-- Файлы книг в бэкап не входят — они лежат отдельно в `books/`
-
-## Логирование
-
-- **Основной лог:** `logs/bot.log` (RotatingFileHandler, 10 МБ, 5 файлов)
-- **Лог покупок:** `logs/purchases.log` (отдельный логгер `purchases`)
-- При старте выводится сводка: версия, схема БД, прокси, количество книг/пользователей/покупок
-
-## FSM-сценарии
-
-### Добавление книги (`AdminAddBook`)
-
-1. `title` — название
-2. `slug` — slug (автоматически из названия, можно изменить)
-3. `description` — описание
-4. `price` — цена в рублях
-5. `files` — файлы книги (отправка документами или список путей)
-6. `cover` — обложка (фото или путь)
-
-### Редактирование книги (`AdminEditBook`)
-
-Редактирует одно поле: `title`, `slug`, `description`, `price_rub`, `sort_order`, `cover_path`, `file_paths`.
-
-### Настройка старта (`AdminStartSettings`)
-
-1. `text` — текст стартового сообщения
-2. `image` — картинка стартового сообщения
-
-### Восстановление бэкапа (`AdminBackupRestore`)
-
-1. `file` — JSON-файл бэкапа
+- **Статистика**: количество пользователей, активных подписок, выручка.
+- **Тарифы**: управление списками (вкл/выкл, редактирование).
+- **Remnawave**: диагностика подключения, статус провайдеров.
+- **Платежи**: история транзакций.
 
 ## Архитектура
 
 ```
-main.py (asyncio.run)
+boot.py (asyncio.run)
   ├── config.py → Settings
   ├── db.py → init_db() + CRUD
-  ├── proxy_manager.py → ProxyManager (aiohttp сессии)
-  ├── keyboards.py → InlineKeyboardMarkup
-  └── router (aiogram Router)
-       ├── Command-хендлеры (/start, /admin, /books, /get, /id)
-       ├── CallbackQuery-хендлеры (кнопки)
-       ├── PreCheckoutQuery (валидация инвойса)
-       ├── successful_payment (запись покупки + выдача файлов)
-       └── FSM-хендлеры (админка)
+  ├── remnawave.py → RemnawaveClient (API calls)
+  ├── user_vpn_handlers.py → Рутер пользователя
+  └── admin_remna_handlers.py → Рутер админа
 ```
 
 **Ключевые паттерны:**
-
-- Глобальная переменная `settings: Settings` — конфигурация
-- Глобальная переменная `proxy_manager: ProxyManager` — управление прокси
-- Все асинхронные функции с `await`
-- FSM-состояния в памяти (`MemoryStorage`)
-- Книги при старте синхронизируются в файловую систему (`sync_book_folder`)
+- Глобальный объект `settings` (dataclass).
+- Асинхронная работа с БД через `aiosqlite`.
+- FSM-состояния в памяти (`MemoryStorage`).
+- Изоляция логики Remnawave в отдельном модуле с fallback-режимом.
 
 ## Стиль кодирования
 
 - Python 3.11+ с `from __future__ import annotations`
-- Строгая типизация через type hints
-- Dataclass для настроек (`Settings`)
-- Функциональный стиль для CRUD (async-функции в `db.py`)
-- AIogram Router для обработки команд и колбэков
+- Строгая типизация (type hints)
 - Комментарии на русском языке
+- Функциональный стиль для CRUD
+- Использование dataclass для конфигурации

@@ -1,4 +1,6 @@
 @echo off
+chcp 65001 >nul
+set PYTHONUTF8=1
 
 :: Проверка наличия .venv
 if not exist ".venv" (
@@ -11,6 +13,8 @@ if not exist ".venv" (
     echo Активация .venv...
     call .venv\Scripts\activate.bat
 )
+
+git pull
 
 :: Запуск бота
 python -m app.main
