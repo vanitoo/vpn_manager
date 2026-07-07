@@ -71,6 +71,16 @@ async def make_bot() -> Bot:
     return Bot(runtime.settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 
+async def close_proxy_manager() -> None:
+    if not proxy_manager:
+        return
+    close = getattr(proxy_manager, 'close', None)
+    if callable(close):
+        result = close()
+        if hasattr(result, '__await__'):
+            await result
+
+
 async def main() -> None:
     runtime.settings = get_settings()
     setup_logging()
@@ -100,8 +110,7 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         log.info('Stopping VPN bot')
-        if proxy_manager:
-            await proxy_manager.close()
+        await close_proxy_manager()
         await bot.session.close()
 
 
