@@ -15,7 +15,7 @@ def main_menu(*, active: bool = False, trial_available: bool = True) -> InlineKe
 
 
 def plans_menu(plans: list[dict]) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=f"{p['title']} · {p['price_rub']} ₽", callback_data=f"plan:{p['id']}")] for p in plans]
+    rows = [[InlineKeyboardButton(text=f"{p['title']} · {p['price_rub']} ₽", callback_data=f"plan:{p['id']}")] for p in plans if p.get('slug') != 'remna-import']
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -101,6 +101,8 @@ def admin_user_menu(telegram_id: int, is_active: bool) -> InlineKeyboardMarkup:
 def admin_plans_menu(plans: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for p in plans:
+        if p.get('slug') == 'remna-import':
+            continue
         public = int(p.get('is_public', 1))
         badge = '🛒' if public else '🔒'
         rows.append([InlineKeyboardButton(text=f"{badge} {'🟢' if p['is_active'] else '⚪'} {p['title']} · {p['price_rub']} ₽", callback_data=f"admin:plan:{p['id']}")])
