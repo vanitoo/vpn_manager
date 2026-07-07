@@ -13,10 +13,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault, CallbackQuery, TelegramObject
 
 from app import runtime
+from app.admin_mailing_handlers import router as admin_mailing_router
 from app.admin_ops import router as admin_ops_router
 from app.admin_plan_handlers import router as admin_plan_router
 from app.admin_remna_handlers import router as admin_remna_router
+from app.admin_squads_handlers import router as admin_squads_router
 from app.config import get_settings
+from app.mailing import init_mailing_tables
 from app.proxy_manager import ProxyManager
 from app.user_vpn_handlers import router as user_vpn_router
 
@@ -92,6 +95,7 @@ async def main() -> None:
 
     await runtime.init_db(runtime.settings.db_path)
     await runtime.init_admin_tables(runtime.settings.db_path)
+    await init_mailing_tables(runtime.settings.db_path)
     await runtime.seed_plans(runtime.settings.db_path, runtime.DEFAULT_PLANS)
 
     bot = await make_bot()
@@ -101,6 +105,8 @@ async def main() -> None:
     dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
     dp.include_router(user_vpn_router)
     dp.include_router(admin_ops_router)
+    dp.include_router(admin_squads_router)
+    dp.include_router(admin_mailing_router)
     dp.include_router(admin_plan_router)
     dp.include_router(admin_remna_router)
     dp.include_router(runtime.router)
