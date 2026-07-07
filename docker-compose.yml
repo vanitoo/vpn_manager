@@ -1,10 +1,10 @@
 services:
-  kamenevabook-bot:
+  vpn-tg-bot:
     build: .
-    container_name: kamenevabook-bot
+    container_name: vpn-tg-bot
     restart: unless-stopped
     env_file:
       - .env
     volumes:
-      - ./books:/app/books
       - ./data:/app/data
+      - ./logs:/app/logs
