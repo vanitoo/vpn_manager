@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import quote
 
 import aiohttp
+from aiohttp import BasicAuth
 
 from app.config import Settings
 
@@ -32,7 +33,15 @@ class RemnawaveClient:
         return bool(self.settings.remnawave_base_url and self.settings.remnawave_api_token)
 
     def _headers(self) -> dict[str, str]:
-        return {'Authorization': f'Bearer {self.settings.remnawave_api_token}', 'Content-Type': 'application/json'}
+        headers = {'Authorization': f'Bearer {self.settings.remnawave_api_token}', 'Content-Type': 'application/json'}
+        if self.settings.remnawave_nginx_auth_enabled and self.settings.remnawave_nginx_cookie_name and self.settings.remnawave_nginx_cookie_value:
+            headers['Cookie'] = f'{self.settings.remnawave_nginx_cookie_name}={self.settings.remnawave_nginx_cookie_value}'
+        return headers
+
+    def _basic_auth(self) -> BasicAuth | None:
+        if self.settings.remnawave_nginx_auth_enabled and self.settings.remnawave_nginx_basic_login and self.settings.remnawave_nginx_basic_password:
+            return BasicAuth(self.settings.remnawave_nginx_basic_login, self.settings.remnawave_nginx_basic_password)
+        return None
 
     def _fallback_access(self, telegram_id: int) -> RemnawaveAccess:
         local_id = f"tg-{telegram_id}-{uuid.uuid4().hex[:8]}"
@@ -63,8 +72,8 @@ class RemnawaveClient:
             raise RuntimeError('REMNAWAVE_BASE_URL is empty')
         url = f"{self.settings.remnawave_base_url}{path}"
         safe_payload = json_payload.copy() if isinstance(json_payload, dict) else None
-        log.info('Remnawave request: %s %s payload=%s', method, path, safe_payload)
-        async with aiohttp.ClientSession(headers=self._headers()) as session:
+        log.info('Remnawave request: %s %s nginx_auth=%s payload=%s', method, path, self.settings.remnawave_nginx_auth_enabled, safe_payload)
+        async with aiohttp.ClientSession(headers=self._headers(), auth=self._basic_auth()) as session:
             async with session.request(method, url, json=json_payload, timeout=30) as resp:
                 text = await resp.text()
                 try:
@@ -86,6 +95,7 @@ class RemnawaveClient:
         if not self.settings.remnawave_api_token:
             return 'REMNAWAVE_API_TOKEN пустой'
         checks = []
+        checks.append(f"nginx_auth={'on' if self.settings.remnawave_nginx_auth_enabled else 'off'} cookie={self.settings.remnawave_nginx_cookie_name or '-'} basic={'on' if self._basic_auth() else 'off'}")
         for path in ['/api/auth/session', '/api/internal-squads', '/api/users?page=0&size=1', '/api/nodes']:
             try:
                 await self._request('GET', path, expected_status=(200, 404))
