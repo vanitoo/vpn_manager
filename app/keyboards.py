@@ -8,14 +8,15 @@ def main_menu(*, active: bool = False, trial_available: bool = True) -> InlineKe
         rows.append([InlineKeyboardButton(text='💳 Продлить доступ', callback_data='plans')])
     else:
         rows.append([InlineKeyboardButton(text='🛡 Купить VPN', callback_data='plans')])
-    if trial_available:
-        rows.append([InlineKeyboardButton(text='🎁 Тестовый доступ', callback_data='trial')])
+        if trial_available:
+            rows.append([InlineKeyboardButton(text='🎁 Тестовый доступ', callback_data='trial')])
     rows.append([InlineKeyboardButton(text='🆘 Поддержка', callback_data='help')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def plans_menu(plans: list[dict]) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=f"{p['title']} · {p['price_rub']} ₽", callback_data=f"plan:{p['id']}")] for p in plans if p.get('slug') != 'remna-import']
+    visible = [p for p in plans if p.get('slug') != 'remna-import' and int(p.get('is_public', 1)) == 1]
+    rows = [[InlineKeyboardButton(text=f"{p['title']} · {p['price_rub']} ₽", callback_data=f"plan:{p['id']}")] for p in visible]
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -33,6 +34,7 @@ def payment_methods_menu(plan_id: int, providers: list[str]) -> InlineKeyboardMa
     labels = {'stars': '⭐ Telegram Stars', 'yookassa': '💳 Карта / СБП'}
     rows = [[InlineKeyboardButton(text=labels.get(p, p), callback_data=f'pay:{p}:{plan_id}')] for p in providers]
     rows.append([InlineKeyboardButton(text='← К тарифу', callback_data=f'plan:{plan_id}')])
+    rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -41,6 +43,7 @@ def external_payment_menu(payment_id: int, payment_url: str, plan_id: int) -> In
         [InlineKeyboardButton(text='Оплатить', url=payment_url)],
         [InlineKeyboardButton(text='Я оплатил', callback_data=f'epay:check:{payment_id}')],
         [InlineKeyboardButton(text='← К тарифу', callback_data=f'plan:{plan_id}')],
+        [InlineKeyboardButton(text='⌂ Главное', callback_data='home')],
     ])
 
 
@@ -58,6 +61,10 @@ def my_vpn_menu(*, subscription_url: str = '', happ_url: str = '') -> InlineKeyb
     rows.append([InlineKeyboardButton(text='Продлить', callback_data='plans')])
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def support_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⌂ Главное', callback_data='home')]])
 
 
 def admin_menu() -> InlineKeyboardMarkup:
