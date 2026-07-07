@@ -19,6 +19,7 @@ class ServicePlanForm(StatesGroup):
     title = State()
     price = State()
     days = State()
+    traffic = State()
 
 
 @router.callback_query(F.data == 'admin:planadd_service')
@@ -63,19 +64,36 @@ async def service_plan_days(message: Message, state: FSMContext) -> None:
     except ValueError:
         await message.answer('Нужна цифра.')
         return
+    await state.update_data(days=days)
+    await state.set_state(ServicePlanForm.traffic)
+    await message.answer('Трафик в ГБ?\n\n0 = безлимит.')
+
+
+@router.message(ServicePlanForm.traffic)
+async def service_plan_traffic(message: Message, state: FSMContext) -> None:
+    if not runtime.admin(message):
+        return
+    try:
+        traffic_gb = int(message.text or '0')
+    except ValueError:
+        await message.answer('Нужна цифра. 0 = безлимит.')
+        return
     data = await state.get_data()
     title = data['title']
     price = int(data['price'])
+    days = int(data['days'])
     slug = re.sub(r'[^a-z0-9]+', '-', f'service-{title}-{days}-{price}'.lower()).strip('-') or f'service-{days}'
-    plan_id = await add_plan(runtime.settings.db_path, slug=slug, title=title, description='Служебный тариф. Не показывается пользователям.', duration_days=days, price_rub=price, traffic_gb=0)
+    plan_id = await add_plan(runtime.settings.db_path, slug=slug, title=title, description='Служебный тариф. Не показывается пользователям.', duration_days=days, price_rub=price, traffic_gb=traffic_gb)
     await mark_plan_admin_only(runtime.settings.db_path, plan_id, True)
     await state.clear()
+    traffic_text = 'безлимит' if traffic_gb == 0 else f'{traffic_gb} ГБ'
     await message.answer(
         f'✅ <b>Служебный тариф создан</b>\n\n'
         f'ID: <code>{plan_id}</code>\n'
         f'Название: <b>{title}</b>\n'
         f'Цена: <b>{price} ₽</b>\n'
         f'Срок: <b>{days} дн.</b>\n'
+        f'Трафик: <b>{traffic_text}</b>\n'
         f'Показ в продаже: <b>нет</b>',
         reply_markup=admin_plan_menu(plan_id, True),
     )
