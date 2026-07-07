@@ -13,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault, CallbackQuery, TelegramObject
 
 from app import runtime
+from app.admin_ops import router as admin_ops_router
 from app.admin_plan_handlers import router as admin_plan_router
 from app.admin_remna_handlers import router as admin_remna_router
 from app.config import get_settings
@@ -99,6 +100,7 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
     dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
     dp.include_router(user_vpn_router)
+    dp.include_router(admin_ops_router)
     dp.include_router(admin_plan_router)
     dp.include_router(admin_remna_router)
     dp.include_router(runtime.router)
