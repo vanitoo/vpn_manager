@@ -10,9 +10,10 @@ Telegram-бот для продажи VPN-доступа: тарифы, Telegram
 - SQLite-база: пользователи, тарифы, платежи, подписки;
 - продление доступа: новая покупка добавляет дни после текущего активного срока;
 - раздел `Мой VPN` с персональной ссылкой подписки;
+- Remnawave API 2.7.x: создание, продление и получение `subscriptionUrl`;
 - админ-команда `/admin` со статистикой и статусами провайдеров;
 - прокси для Telegram Bot API и логирование;
-- безопасный режим без Remnawave API: бот запускается и выдаёт тестовую ссылку, чтобы интерфейс и платежи можно было проверить до интеграции.
+- безопасный stub-режим без Remnawave API.
 
 ## Запуск
 
@@ -79,22 +80,44 @@ RECEIPT_FALLBACK_EMAIL=orders@example.com
 ## Remnawave
 
 ```env
-REMNAWAVE_BASE_URL=https://panel.example.com
+REMNAWAVE_BASE_URL=https://pp.6679.ru
 REMNAWAVE_API_TOKEN=replace_me
-REMNAWAVE_SUBSCRIPTION_BASE_URL=https://sub.example.com
+REMNAWAVE_INTERNAL_SQUAD_UUID=replace_me
+REMNAWAVE_EXTERNAL_SQUAD_UUID=
+REMNAWAVE_SUBSCRIPTION_BASE_URL=
+REMNAWAVE_DEFAULT_TRAFFIC_GB=0
+REMNAWAVE_HWID_DEVICE_LIMIT=0
 ```
 
 Интеграция изолирована в `app/remnawave.py`.
 
-Сейчас в нём есть один центральный метод `create_or_extend_user()`. До подключения точной схемы API твоей конкретной версии Remnawave он работает в stub-режиме: создаёт тестовый ID и URL, не пытаясь изобрести несуществующий endpoint.
+Для Remnawave 2.7.x используется схема:
 
-После получения документации/ответа от панели надо уточнить:
+```text
+GET   /api/users/by-email/{email}  найти пользователя
+POST  /api/users                   создать пользователя
+PATCH /api/users                   продлить / обновить пользователя
+```
 
-1. endpoint создания или обновления пользователя;
-2. формат даты истечения доступа;
-3. поле лимита трафика;
-4. где API возвращает subscription URL;
-5. как корректно продлевать уже существующего пользователя, а не создавать дубль.
+При создании отправляются поля:
+
+```text
+username
+status=ACTIVE
+expireAt
+activeInternalSquads=[REMNAWAVE_INTERNAL_SQUAD_UUID]
+email
+telegramId
+description
+trafficLimitBytes, если тариф с лимитом
+trafficLimitStrategy=NO_RESET
+hwidDeviceLimit, если REMNAWAVE_HWID_DEVICE_LIMIT > 0
+externalSquadUuid, если REMNAWAVE_EXTERNAL_SQUAD_UUID заполнен
+```
+
+Для продления бот ищет пользователя по email `tg<telegram_id>@bot.local`. Если пользователь уже активен, новые дни добавляются к текущему `expireAt`, а не к текущей дате. Если пользователя нет, создаётся новый.
+
+Ссылка берётся из поля `subscriptionUrl`. Если панель его не вернула, бот пробует собрать ссылку из `REMNAWAVE_SUBSCRIPTION_BASE_URL` и `shortUuid`/`uuid`.
 
 ## SQLite и будущий переход на PostgreSQL
 
@@ -115,5 +138,5 @@ SQLite подходит для MVP и одного процесса бота. П
 ## Важно
 
 - Не хранить `.env`, токены, ключи ЮKassa и Remnawave API в Git.
-- До подключения Remnawave реальная VPN-конфигурация не создаётся.
-- Проверь, какой именно API опубликован в твоей панели Remnawave, прежде чем включать `REMNAWAVE_API_TOKEN` в проде.
+- Если токен был отправлен в чат, перевыпусти его в Remnawave.
+- Для реальной выдачи нужен `REMNAWAVE_INTERNAL_SQUAD_UUID`.
