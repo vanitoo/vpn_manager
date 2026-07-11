@@ -57,11 +57,11 @@ class YooKassaProvider:
                 'customer': receipt_customer,
                 'items': [
                     {
-                        'description': description[:128] or 'Электронная книга',
+                        'description': description[:128] or 'Доступ к VPN-сервису',
                         'quantity': '1.00',
                         'amount': {'value': _amount(amount_rub), 'currency': 'RUB'},
                         'vat_code': 1,
-                        'payment_subject': 'commodity',
+                        'payment_subject': 'service',
                         'payment_mode': 'full_payment',
                     }
                 ],
