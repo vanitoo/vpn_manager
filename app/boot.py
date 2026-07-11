@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -18,7 +19,10 @@ from app.admin_ops import router as admin_ops_router
 from app.admin_plan_handlers import router as admin_plan_router
 from app.admin_remna_handlers import router as admin_remna_router
 from app.admin_squads_handlers import router as admin_squads_router
+from app.backup_handlers import router as backup_router
+from app.common_fsm import router as common_fsm_router
 from app.config import get_settings
+from app.external_payment_handlers import router as external_payment_router
 from app.mailing import init_mailing_tables
 from app.proxy_manager import ProxyManager
 from app.user_vpn_handlers import router as user_vpn_router
@@ -54,11 +58,20 @@ def setup_logging() -> None:
 
 
 async def setup_commands(bot: Bot) -> None:
-    public = [BotCommand(command='start', description='Главное меню')]
+    public = [
+        BotCommand(command='start', description='Главное меню'),
+        BotCommand(command='cancel', description='Отменить текущее действие'),
+    ]
     await bot.set_my_commands(public, scope=BotCommandScopeDefault())
     for admin_id in runtime.settings.admin_ids:
-        await bot.set_my_commands(public + [BotCommand(command='admin', description='Админка')], scope=BotCommandScopeChat(chat_id=admin_id))
-    log.info('Minimal Telegram commands registered. Admin IDs: %s', runtime.settings.admin_ids)
+        await bot.set_my_commands(
+            public + [
+                BotCommand(command='admin', description='Админка'),
+                BotCommand(command='backup', description='Создать бэкап'),
+            ],
+            scope=BotCommandScopeChat(chat_id=admin_id),
+        )
+    log.info('Telegram commands registered. Admin IDs: %s', runtime.settings.admin_ids)
 
 
 async def make_bot() -> Bot:
@@ -76,6 +89,14 @@ async def make_bot() -> Bot:
     return Bot(runtime.settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 
+async def notify_admins(bot: Bot, text: str) -> None:
+    for admin_id in runtime.settings.admin_ids:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:
+            log.exception('Cannot send lifecycle alert to admin %s', admin_id)
+
+
 async def close_proxy_manager() -> None:
     if not proxy_manager:
         return
@@ -91,6 +112,7 @@ async def main() -> None:
     setup_logging()
     log.info('Starting VPN bot')
     log.info('DB=%s LOG=%s', runtime.settings.db_path, runtime.settings.log_file)
+    log.info('Payments=%s', runtime.settings.payment_providers)
     log.info('Remnawave base=%s token_set=%s squad_set=%s', runtime.settings.remnawave_base_url, bool(runtime.settings.remnawave_api_token), bool(runtime.settings.remnawave_internal_squad_uuid))
 
     await runtime.init_db(runtime.settings.db_path)
@@ -103,7 +125,10 @@ async def main() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
+    dp.include_router(common_fsm_router)
     dp.include_router(user_vpn_router)
+    dp.include_router(external_payment_router)
+    dp.include_router(backup_router)
     dp.include_router(admin_ops_router)
     dp.include_router(admin_squads_router)
     dp.include_router(admin_mailing_router)
@@ -111,15 +136,27 @@ async def main() -> None:
     dp.include_router(admin_remna_router)
     dp.include_router(runtime.router)
 
+    started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     try:
         if runtime.settings.delete_webhook_on_start:
             log.info('Deleting webhook. drop_pending=%s', runtime.settings.drop_pending_updates)
             await bot.delete_webhook(drop_pending_updates=runtime.settings.drop_pending_updates)
         me = await bot.get_me()
         log.info('Bot started: @%s id=%s', me.username, me.id)
+        if runtime.settings.startup_alerts_enabled:
+            await notify_admins(
+                bot,
+                f'🟢 <b>VPN bot запущен</b>\n\n'
+                f'Bot: @{me.username}\n'
+                f'Режим: <b>polling / local</b>\n'
+                f'Платежи: <code>{", ".join(runtime.settings.payment_providers)}</code>\n'
+                f'Время: <code>{started_at}</code>',
+            )
         await dp.start_polling(bot)
     finally:
         log.info('Stopping VPN bot')
+        if runtime.settings.shutdown_alerts_enabled:
+            await notify_admins(bot, '🔴 <b>VPN bot остановлен</b>\n\nРежим: polling / local')
         await close_proxy_manager()
         await bot.session.close()
 
