@@ -13,6 +13,7 @@ from app.payments.base import PaymentProviderError
 
 router = Router()
 log = logging.getLogger(__name__)
+SUPPORTED_LOCAL_PROVIDERS = {'stars', 'yookassa', 'cryptomus'}
 
 
 def payment_methods_keyboard(plan_id: int) -> InlineKeyboardMarkup:
@@ -20,12 +21,11 @@ def payment_methods_keyboard(plan_id: int) -> InlineKeyboardMarkup:
         'stars': '⭐ Telegram Stars',
         'yookassa': '💳 ЮKassa / СБП',
         'cryptomus': '₿ Cryptomus',
-        'lava': '🌋 Lava',
-        'platega': '💳 Platega',
     }
+    providers = [p for p in runtime.settings.payment_providers if p in SUPPORTED_LOCAL_PROVIDERS]
     rows = [
         [InlineKeyboardButton(text=labels.get(provider, provider), callback_data=f'pay:{provider}:{plan_id}')]
-        for provider in runtime.settings.payment_providers
+        for provider in providers
     ]
     rows.append([InlineKeyboardButton(text='← К тарифу', callback_data=f'plan:{plan_id}')])
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
@@ -70,6 +70,9 @@ async def create_external_payment(callback: CallbackQuery) -> None:
             reply_markup=external_payment_menu(int(pending['id']), pending['payment_url'], plan_id),
         )
         return
+    receipt_customer = None
+    if provider_name == 'yookassa' and runtime.settings.receipt_fallback_email:
+        receipt_customer = {'email': runtime.settings.receipt_fallback_email}
     try:
         created = await provider.create_payment(
             amount_rub=int(plan['price_rub']),
@@ -80,6 +83,7 @@ async def create_external_payment(callback: CallbackQuery) -> None:
                 'plan_id': plan_id,
                 'user_id': user['id'],
             },
+            receipt_customer=receipt_customer,
         )
     except PaymentProviderError as exc:
         log.exception('Payment create failed: provider=%s', provider_name)
