@@ -23,6 +23,8 @@ from app.backup_handlers import router as backup_router
 from app.common_fsm import router as common_fsm_router
 from app.config import get_settings
 from app.external_payment_handlers import router as external_payment_router
+from app.faq import init_faq_tables
+from app.faq_handlers import router as faq_router
 from app.mailing import init_mailing_tables
 from app.proxy_manager import ProxyManager
 from app.user_vpn_handlers import router as user_vpn_router
@@ -118,6 +120,7 @@ async def main() -> None:
     await runtime.init_db(runtime.settings.db_path)
     await runtime.init_admin_tables(runtime.settings.db_path)
     await init_mailing_tables(runtime.settings.db_path)
+    await init_faq_tables(runtime.settings.db_path)
     await runtime.seed_plans(runtime.settings.db_path, runtime.DEFAULT_PLANS)
 
     bot = await make_bot()
@@ -127,6 +130,7 @@ async def main() -> None:
     dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
     dp.include_router(common_fsm_router)
     dp.include_router(user_vpn_router)
+    dp.include_router(faq_router)
     dp.include_router(external_payment_router)
     dp.include_router(backup_router)
     dp.include_router(admin_ops_router)
