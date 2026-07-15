@@ -17,16 +17,9 @@ SUPPORTED_LOCAL_PROVIDERS = {'stars', 'yookassa', 'cryptomus'}
 
 
 def payment_methods_keyboard(plan_id: int) -> InlineKeyboardMarkup:
-    labels = {
-        'stars': '⭐ Telegram Stars',
-        'yookassa': '💳 ЮKassa / СБП',
-        'cryptomus': '₿ Cryptomus',
-    }
+    labels = {'stars': '⭐ Telegram Stars', 'yookassa': '💳 ЮKassa / СБП', 'cryptomus': '₿ Cryptomus'}
     providers = [p for p in runtime.settings.payment_providers if p in SUPPORTED_LOCAL_PROVIDERS]
-    rows = [
-        [InlineKeyboardButton(text=labels.get(provider, provider), callback_data=f'pay:{provider}:{plan_id}')]
-        for provider in providers
-    ]
+    rows = [[InlineKeyboardButton(text=labels.get(provider, provider), callback_data=f'pay:{provider}:{plan_id}')] for provider in providers]
     rows.append([InlineKeyboardButton(text='← К тарифу', callback_data=f'plan:{plan_id}')])
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -52,37 +45,18 @@ async def create_external_payment(callback: CallbackQuery) -> None:
     if not provider.is_configured:
         await callback.message.answer(f'Способ оплаты {provider_name} включён, но реквизиты не настроены в .env.')
         return
-    user = await upsert_user(
-        runtime.settings.db_path,
-        telegram_id=callback.from_user.id,
-        username=callback.from_user.username,
-        full_name=callback.from_user.full_name,
-    )
-    pending = await get_active_pending_payment(
-        runtime.settings.db_path,
-        telegram_id=callback.from_user.id,
-        plan_id=plan_id,
-        ttl_minutes=runtime.settings.pending_payment_ttl_minutes,
-    )
+    user = await upsert_user(runtime.settings.db_path, telegram_id=callback.from_user.id, username=callback.from_user.username, full_name=callback.from_user.full_name)
+    pending = await get_active_pending_payment(runtime.settings.db_path, telegram_id=callback.from_user.id, plan_id=plan_id, ttl_minutes=runtime.settings.pending_payment_ttl_minutes)
     if pending and pending.get('provider') == provider_name and pending.get('payment_url'):
-        await callback.message.answer(
-            'У вас уже есть незавершённый платёж.',
-            reply_markup=external_payment_menu(int(pending['id']), pending['payment_url'], plan_id),
-        )
+        await callback.message.answer('У вас уже есть незавершённый платёж.', reply_markup=external_payment_menu(int(pending['id']), pending['payment_url'], plan_id))
         return
-    receipt_customer = None
-    if provider_name == 'yookassa' and runtime.settings.receipt_fallback_email:
-        receipt_customer = {'email': runtime.settings.receipt_fallback_email}
+    receipt_customer = {'email': runtime.settings.receipt_fallback_email} if provider_name == 'yookassa' and runtime.settings.receipt_fallback_email else None
     try:
         created = await provider.create_payment(
             amount_rub=int(plan['price_rub']),
             description=f"VPN: {plan['title']} на {plan['duration_days']} дней",
             return_url=runtime.settings.yookassa_return_url if provider_name == 'yookassa' else runtime.settings.cryptomus_return_url,
-            metadata={
-                'telegram_id': callback.from_user.id,
-                'plan_id': plan_id,
-                'user_id': user['id'],
-            },
+            metadata={'telegram_id': callback.from_user.id, 'plan_id': plan_id, 'user_id': user['id']},
             receipt_customer=receipt_customer,
         )
     except PaymentProviderError as exc:
@@ -90,17 +64,10 @@ async def create_external_payment(callback: CallbackQuery) -> None:
         await callback.message.answer(f'Не удалось создать платёж: <code>{str(exc)[:1000]}</code>')
         return
     payment_id = await add_payment(
-        runtime.settings.db_path,
-        provider=provider_name,
-        provider_payment_id=created.provider_payment_id,
-        user_id=int(user['id']),
-        telegram_id=callback.from_user.id,
-        plan_id=plan_id,
-        amount_rub=int(plan['price_rub']),
-        currency='RUB',
-        status='pending',
-        payment_url=created.payment_url,
-        payload=created.raw,
+        runtime.settings.db_path, provider=provider_name, provider_payment_id=created.provider_payment_id,
+        user_id=int(user['id']), telegram_id=callback.from_user.id, plan_id=plan_id,
+        amount_rub=int(plan['price_rub']), currency='RUB', status='pending',
+        payment_url=created.payment_url, payload=created.raw,
     )
     await callback.message.answer(
         f"💳 <b>{plan['title']}</b>\n\nСумма: <b>{plan['price_rub']} ₽</b>\nПосле оплаты нажмите «Я оплатил».",
@@ -132,20 +99,12 @@ async def check_external_payment(callback: CallbackQuery) -> None:
         )
         return
     plan = await get_plan_by_id(runtime.settings.db_path, int(payment['plan_id']))
-    user = await upsert_user(
-        runtime.settings.db_path,
-        telegram_id=callback.from_user.id,
-        username=callback.from_user.username,
-        full_name=callback.from_user.full_name,
-    )
+    user = await upsert_user(runtime.settings.db_path, telegram_id=callback.from_user.id, username=callback.from_user.username, full_name=callback.from_user.full_name)
     try:
         subscription = await runtime.provision(user, callback.from_user.id, plan)
     except Exception as exc:
         log.exception('Paid payment provisioning failed: payment_id=%s', payment_id)
-        await callback.message.answer(
-            'Оплата подтверждена, но Remnawave не выдал конфигурацию. Платёж сохранён, обратитесь к администратору.\n\n'
-            f'<code>{str(exc)[:800]}</code>'
-        )
+        await callback.message.answer('Оплата подтверждена, но Remnawave не выдал конфигурацию. Платёж сохранён, обратитесь к администратору.\n\n' f'<code>{str(exc)[:800]}</code>')
         return
     await mark_payment_paid(runtime.settings.db_path, payment_id, provider_status='paid')
     await attach_subscription_to_payment(runtime.settings.db_path, payment_id, int(subscription['id']))
@@ -153,18 +112,12 @@ async def check_external_payment(callback: CallbackQuery) -> None:
     await callback.message.answer(
         '✅ <b>Оплата подтверждена. VPN активирован.</b>\n\n'
         f"Доступ до: <b>{subscription['expires_at'][:16]}</b>\n\n"
-        f'<code>{url}</code>',
-        reply_markup=after_purchase_menu(),
+        'Нажмите кнопку ниже, чтобы открыть подписку.',
+        reply_markup=after_purchase_menu(url),
     )
     if runtime.settings.admin_notify_purchases:
         for admin_id in runtime.settings.admin_ids:
             try:
-                await callback.bot.send_message(
-                    admin_id,
-                    f"💰 Оплата {payment['provider']}\n"
-                    f"Пользователь: <code>{callback.from_user.id}</code>\n"
-                    f"Тариф: <b>{plan['title']}</b>\n"
-                    f"Сумма: <b>{payment['amount_rub']} ₽</b>",
-                )
+                await callback.bot.send_message(admin_id, f"💰 Оплата {payment['provider']}\nПользователь: <code>{callback.from_user.id}</code>\nТариф: <b>{plan['title']}</b>\nСумма: <b>{payment['amount_rub']} ₽</b>")
             except Exception:
                 log.exception('Cannot notify admin %s about purchase', admin_id)
