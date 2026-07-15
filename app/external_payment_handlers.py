@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app import runtime
-from app.db import add_payment, attach_subscription_to_payment, get_active_pending_payment, get_payment, get_plan_by_id, mark_payment_paid, upsert_user
+from app.admin_db import has_used_trial
+from app.db import add_payment, attach_subscription_to_payment, get_active_pending_payment, get_payment, get_plan_by_id, list_plans, mark_payment_paid, upsert_user
 from app.keyboards import after_purchase_menu, external_payment_menu
 from app.payments import build_provider
 from app.payments.base import PaymentProviderError
@@ -30,6 +31,54 @@ async def choose_payment(callback: CallbackQuery) -> None:
     await callback.answer()
     plan_id = int(callback.data.split(':', 1)[1])
     await callback.message.answer('Выберите способ оплаты:', reply_markup=payment_methods_keyboard(plan_id))
+
+
+@router.callback_query(F.data == 'trial')
+async def activate_trial(callback: CallbackQuery) -> None:
+    await callback.answer('Создаю тестовый доступ')
+    if await has_used_trial(runtime.settings.db_path, callback.from_user.id):
+        await callback.message.answer('Тестовый доступ уже использован.')
+        return
+    plans = await list_plans(runtime.settings.db_path, active_only=True)
+    if not plans:
+        await callback.message.answer('Нет активного тарифа для тестового доступа.')
+        return
+    user = await upsert_user(runtime.settings.db_path, telegram_id=callback.from_user.id, username=callback.from_user.username, full_name=callback.from_user.full_name)
+    plan = {**plans[0], 'duration_days': runtime.TRIAL_DAYS}
+    subscription = await runtime.provision(user, callback.from_user.id, plan, True)
+    url = subscription.get('subscription_url') or ''
+    await callback.message.answer(
+        '🎁 <b>Тестовый доступ на 24 часа активирован.</b>\n\nНажмите кнопку ниже, чтобы открыть VPN-подписку.',
+        reply_markup=after_purchase_menu(url),
+    )
+
+
+@router.message(F.successful_payment)
+async def stars_paid(message: Message) -> None:
+    payload = message.successful_payment.invoice_payload
+    if not payload.startswith('vpn:'):
+        return
+    plan_id = int(payload.split(':', 1)[1])
+    plan = await get_plan_by_id(runtime.settings.db_path, plan_id)
+    user = await upsert_user(runtime.settings.db_path, telegram_id=message.from_user.id, username=message.from_user.username, full_name=message.from_user.full_name)
+    subscription = await runtime.provision(user, message.from_user.id, plan)
+    await add_payment(
+        runtime.settings.db_path,
+        provider='stars',
+        provider_payment_id=message.successful_payment.telegram_payment_charge_id,
+        user_id=int(user['id']),
+        telegram_id=message.from_user.id,
+        plan_id=plan_id,
+        amount_rub=int(plan['price_rub']),
+        currency='XTR',
+        status='paid',
+        telegram_payment_charge_id=message.successful_payment.telegram_payment_charge_id,
+    )
+    url = subscription.get('subscription_url') or ''
+    await message.answer(
+        '✅ <b>Оплата получена. VPN активирован.</b>\n\nНажмите кнопку ниже, чтобы открыть VPN-подписку.',
+        reply_markup=after_purchase_menu(url),
+    )
 
 
 @router.callback_query(F.data.startswith('pay:yookassa:') | F.data.startswith('pay:cryptomus:'))
