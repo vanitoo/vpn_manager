@@ -67,11 +67,9 @@ async def my_vpn(callback: CallbackQuery) -> None:
         await callback.message.answer('🔑 Нет активного доступа.', reply_markup=main_menu(active=False, trial_available=trial_available))
         return
     page = subscription_page_url(sub.get('subscription_url') or '')
-    happ = happ_url(page)
     text = (
         f"🔑 <b>Ваш VPN</b>\n\n"
         f"Доступ активен до: <b>{esc(str(sub['expires_at'])[:16])}</b>\n\n"
-        f"<b>Happ:</b>\n<code>{esc(happ)}</code>\n\n"
-        f"<b>Страница подписки:</b>\n<code>{esc(page)}</code>"
+        "Нажмите кнопку ниже, чтобы открыть страницу подписки и добавить VPN в приложение."
     )
-    await callback.message.answer(text, reply_markup=my_vpn_menu(subscription_url=page, happ_url=happ))
+    await callback.message.answer(text, reply_markup=my_vpn_menu(subscription_url=page, happ_url=happ_url(page)))
