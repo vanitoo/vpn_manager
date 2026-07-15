@@ -10,7 +10,7 @@ def main_menu(*, active: bool = False, trial_available: bool = True) -> InlineKe
         rows.append([InlineKeyboardButton(text='🛡 Купить VPN', callback_data='plans')])
         if trial_available:
             rows.append([InlineKeyboardButton(text='🎁 Тестовый доступ', callback_data='trial')])
-    rows.append([InlineKeyboardButton(text='🆘 Поддержка', callback_data='help')])
+    rows.append([InlineKeyboardButton(text='❓ FAQ', callback_data='faq'), InlineKeyboardButton(text='🆘 Поддержка', callback_data='help')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -31,7 +31,7 @@ def plan_menu(plan_id: int, *, has_pending: bool = False) -> InlineKeyboardMarku
 
 
 def payment_methods_menu(plan_id: int, providers: list[str]) -> InlineKeyboardMarkup:
-    labels = {'stars': '⭐ Telegram Stars', 'yookassa': '💳 Карта / СБП'}
+    labels = {'stars': '⭐ Telegram Stars', 'yookassa': '💳 Карта / СБП', 'cryptomus': '₿ Cryptomus'}
     rows = [[InlineKeyboardButton(text=labels.get(p, p), callback_data=f'pay:{p}:{plan_id}')] for p in providers]
     rows.append([InlineKeyboardButton(text='← К тарифу', callback_data=f'plan:{plan_id}')])
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
@@ -47,18 +47,21 @@ def external_payment_menu(payment_id: int, payment_url: str, plan_id: int) -> In
     ])
 
 
-def after_purchase_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🔑 Подключить VPN', callback_data='my_vpn')],
-        [InlineKeyboardButton(text='⌂ Главное', callback_data='home')],
-    ])
+def after_purchase_menu(subscription_url: str = '') -> InlineKeyboardMarkup:
+    rows = []
+    if subscription_url:
+        rows.append([InlineKeyboardButton(text='🚀 Открыть VPN-подписку', url=subscription_url)])
+    rows.append([InlineKeyboardButton(text='🔑 Мой VPN', callback_data='my_vpn')])
+    rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def my_vpn_menu(*, subscription_url: str = '', happ_url: str = '') -> InlineKeyboardMarkup:
     rows = []
     if subscription_url:
-        rows.append([InlineKeyboardButton(text='🌐 Открыть страницу подписки', url=subscription_url)])
-    rows.append([InlineKeyboardButton(text='Продлить', callback_data='plans')])
+        rows.append([InlineKeyboardButton(text='🚀 Открыть VPN-подписку', url=subscription_url)])
+    rows.append([InlineKeyboardButton(text='💳 Продлить', callback_data='plans')])
+    rows.append([InlineKeyboardButton(text='❓ Инструкция / FAQ', callback_data='faq')])
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -67,13 +70,45 @@ def support_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⌂ Главное', callback_data='home')]])
 
 
+def faq_list_menu(items: list[dict]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=str(item['question'])[:50], callback_data=f"faq:item:{item['id']}")] for item in items]
+    rows.append([InlineKeyboardButton(text='🆘 Поддержка', callback_data='help')])
+    rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def faq_item_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='← FAQ', callback_data='faq')],
+        [InlineKeyboardButton(text='🆘 Поддержка', callback_data='help')],
+        [InlineKeyboardButton(text='⌂ Главное', callback_data='home')],
+    ])
+
+
 def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='📊 Дашборд', callback_data='admin:dashboard')],
         [InlineKeyboardButton(text='👥 Пользователи', callback_data='admin:users'), InlineKeyboardButton(text='💰 Тарифы', callback_data='admin:plans')],
         [InlineKeyboardButton(text='🖥 Ноды', callback_data='admin:nodes'), InlineKeyboardButton(text='🧩 Squads', callback_data='admin:squads')],
-        [InlineKeyboardButton(text='📣 Рассылки', callback_data='admin:mailing'), InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs')],
-        [InlineKeyboardButton(text='🌍 Remnawave', callback_data='admin:remna'), InlineKeyboardButton(text='ℹ️ Система', callback_data='admin:system')],
+        [InlineKeyboardButton(text='📣 Рассылки', callback_data='admin:mailing'), InlineKeyboardButton(text='❓ FAQ', callback_data='admin:faq')],
+        [InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs'), InlineKeyboardButton(text='ℹ️ Система', callback_data='admin:system')],
+        [InlineKeyboardButton(text='🌍 Remnawave', callback_data='admin:remna')],
+    ])
+
+
+def admin_faq_menu(items: list[dict]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=f"{'🟢' if item['is_active'] else '⚪'} {str(item['question'])[:42]}", callback_data=f"admin:faq:item:{item['id']}")] for item in items]
+    rows.append([InlineKeyboardButton(text='➕ Добавить вопрос', callback_data='admin:faq:add')])
+    rows.append([InlineKeyboardButton(text='← Админка', callback_data='admin:home')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_faq_item_menu(item_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='✏️ Вопрос', callback_data=f'admin:faq:editq:{item_id}'), InlineKeyboardButton(text='✏️ Ответ', callback_data=f'admin:faq:edita:{item_id}')],
+        [InlineKeyboardButton(text='⛔ Скрыть' if is_active else '✅ Показать', callback_data=f'admin:faq:toggle:{item_id}')],
+        [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'admin:faq:delete:{item_id}')],
+        [InlineKeyboardButton(text='← FAQ', callback_data='admin:faq')],
     ])
 
 
