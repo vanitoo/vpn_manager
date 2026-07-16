@@ -80,7 +80,7 @@ RECEIPT_FALLBACK_EMAIL=orders@example.com
 ## Remnawave
 
 ```env
-REMNAWAVE_BASE_URL=https://pp.6679.ru
+REMNAWAVE_BASE_URL=https://rw.example.com
 REMNAWAVE_API_TOKEN=replace_me
 REMNAWAVE_INTERNAL_SQUAD_UUID=replace_me
 REMNAWAVE_EXTERNAL_SQUAD_UUID=
