@@ -4,6 +4,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.enums import ChatType
+from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from app import runtime
@@ -13,6 +14,11 @@ from app.support.storage import add_support_message, get_ticket_by_topic, suppor
 
 router = Router()
 log = logging.getLogger(__name__)
+
+
+@router.message(Command('chatid'), F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
+async def show_chat_id(message: Message) -> None:
+    await message.reply(f'ID этой группы: <code>{message.chat.id}</code>')
 
 
 @router.message(F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}), F.message_thread_id)
