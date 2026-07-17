@@ -19,6 +19,7 @@ from app.admin_ops import router as admin_ops_router
 from app.admin_plan_handlers import router as admin_plan_router
 from app.admin_remna_handlers import router as admin_remna_router
 from app.admin_squads_handlers import router as admin_squads_router
+from app.admin_users_handlers import router as admin_users_router
 from app.backup_handlers import router as backup_router
 from app.common_fsm import router as common_fsm_router
 from app.config import get_settings
@@ -133,6 +134,7 @@ async def main() -> None:
     dp.include_router(faq_router)
     dp.include_router(external_payment_router)
     dp.include_router(backup_router)
+    dp.include_router(admin_users_router)
     dp.include_router(admin_ops_router)
     dp.include_router(admin_squads_router)
     dp.include_router(admin_mailing_router)
