@@ -197,3 +197,29 @@ async def add_plan(db_path: str, *, slug: str, title: str, description: str, dur
         ''', (slug, title, description, duration_days, traffic_gb, price_rub, ts, ts))
         await db.commit()
         return int(cur.lastrowid)
+
+
+async def plan_usage_counts(db_path: str, plan_id: int) -> dict[str, int]:
+    async with aiosqlite.connect(db_path) as db:
+        async def count(table: str) -> int:
+            try:
+                async with db.execute(f'SELECT COUNT(*) FROM {table} WHERE plan_id=?', (plan_id,)) as cur:
+                    row = await cur.fetchone()
+                    return int(row[0] or 0)
+            except aiosqlite.OperationalError:
+                return 0
+        return {
+            'subscriptions': await count('subscriptions'),
+            'payments': await count('payments'),
+            'grants': await count('access_grants'),
+        }
+
+
+async def delete_unused_plan(db_path: str, plan_id: int) -> bool:
+    usage = await plan_usage_counts(db_path, plan_id)
+    if any(usage.values()):
+        return False
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute('DELETE FROM plans WHERE id=?', (plan_id,))
+        await db.commit()
+        return bool(cursor.rowcount)

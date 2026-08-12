@@ -43,6 +43,8 @@ def user_squad_ids(user: dict[str, Any]) -> list[str]:
 def stats_by_squad(users: list[dict[str, Any]], squads: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     names = {squad_id(s): squad_name(s) for s in squads if squad_id(s)}
     data: dict[str, dict[str, Any]] = defaultdict(lambda: {'name': 'unknown', 'users': 0, 'active': 0, 'traffic_used': 0, 'traffic_limit': 0})
+    for sid, name in names.items():
+        data[sid]['name'] = name
     for user in users:
         ids = user_squad_ids(user) or ['no-squad']
         for sid in ids:

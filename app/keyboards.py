@@ -180,7 +180,7 @@ def admin_users_menu() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_user_menu(telegram_id: int, is_active: bool, free_access_active: bool = False) -> InlineKeyboardMarkup:
+def admin_user_menu(telegram_id: int, is_active: bool, free_access_active: bool = False, remna_uuid: str = '') -> InlineKeyboardMarkup:
     action = '🚫 Заблокировать' if is_active else '✅ Активировать'
     key = 'block' if is_active else 'activate'
     free_button = (
@@ -188,11 +188,14 @@ def admin_user_menu(telegram_id: int, is_active: bool, free_access_active: bool 
         if free_access_active else
         InlineKeyboardButton(text='🎁 Выдать другу', callback_data=f'admin:friend:plans:{telegram_id}')
     )
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [free_button],
         [InlineKeyboardButton(text=action, callback_data=f'admin:{key}:{telegram_id}')],
-        [InlineKeyboardButton(text='← Пользователи', callback_data='admin:users')],
-    ])
+    ]
+    if remna_uuid:
+        rows.append([InlineKeyboardButton(text='🧩 Сменить Squad', callback_data=f'admin:remna:change_squad:{remna_uuid}')])
+    rows.append([InlineKeyboardButton(text='← Пользователи', callback_data='admin:users')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_plans_menu(plans: list[dict]) -> InlineKeyboardMarkup:
@@ -216,5 +219,6 @@ def admin_plan_menu(plan_id: int, is_active: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text='📅 Дни', callback_data=f'admin:planedit:duration_days:{plan_id}'), InlineKeyboardButton(text='📶 Трафик', callback_data=f'admin:planedit:traffic_gb:{plan_id}')],
         [InlineKeyboardButton(text='📝 Описание', callback_data=f'admin:planedit:description:{plan_id}')],
         [InlineKeyboardButton(text='⛔ Выключить' if is_active else '✅ Включить', callback_data=f'admin:plantoggle:{plan_id}')],
+        [InlineKeyboardButton(text='🗑 Удалить тариф', callback_data=f'admin:plandelete:ask:{plan_id}')],
         [InlineKeyboardButton(text='← Тарифы', callback_data='admin:plans')],
     ])

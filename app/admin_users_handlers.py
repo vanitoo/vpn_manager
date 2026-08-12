@@ -341,7 +341,7 @@ async def user_card(callback: CallbackQuery) -> None:
     tg = local.get('telegram_id') or item.get('telegram_id')
     if tg:
         free_grant = await get_active_access_grant(runtime.settings.db_path, int(tg))
-        markup = admin_user_menu(int(tg), status == 'active', bool(free_grant))
+        markup = admin_user_menu(int(tg), status == 'active', bool(free_grant), remna_uuid(remote) or str(local.get('remnawave_user_id') or ''))
     else:
         markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text='🔄 Синхронизировать Remnawave → Bot', callback_data='admin:remna:sync')],
