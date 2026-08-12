@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """
-Proxy Manager v1.2.0
+Proxy Manager v1.3.1
 
 Универсальный менеджер прокси для aiogram/aiohttp.
 
 Режимы:
 - off      — прокси отключены, соединение напрямую.
-- single   — используется только первый прокси из списка, без переключения.
+- single   — используется один прокси; при ошибке список циклически перебирается без остановки.
 - sticky   — выбирается один живой прокси и держится до ошибки. После ошибки переключается на следующий живой.
 - failover — приоритетный режим: сначала используется proxy #0. Если он упал — переход на proxy #1/#2/... .
              Health-check периодически проверяет упавшие прокси и, когда primary оживает, возвращает его в работу.
@@ -48,7 +48,7 @@ import aiohttp
 
 log = logging.getLogger(__name__)
 
-__version__ = "1.2.0"
+__version__ = "1.3.1"
 
 
 class ProxyMode(str, Enum):
@@ -109,10 +109,12 @@ class ProxyManager:
         healthcheck_url: str = "https://api.telegram.org",
         healthcheck_timeout: float = 8.0,
         healthcheck_interval: float = 60.0,
+        ssl_verify: bool = True,
     ):
         self.proxies = [p.strip() for p in proxies if p and p.strip()]
         self.mode = ProxyMode.normalize(str(mode)) if not isinstance(mode, ProxyMode) else mode
         self.current_index = 0
+        self._rotate_started = False
         self.failed_proxies: set[int] = set()
         self.max_failures = 3
         self.failure_counts: dict[int, int] = {}
@@ -120,6 +122,7 @@ class ProxyManager:
         self.healthcheck_url = healthcheck_url
         self.healthcheck_timeout = float(healthcheck_timeout)
         self.healthcheck_interval = float(healthcheck_interval)
+        self.ssl_verify = bool(ssl_verify)
         self._healthcheck_task: Optional[asyncio.Task] = None
 
         if not self.proxies:
@@ -142,6 +145,7 @@ class ProxyManager:
         healthcheck_url: str = "https://api.telegram.org",
         healthcheck_timeout: float = 8.0,
         healthcheck_interval: float = 60.0,
+        ssl_verify: bool = True,
     ) -> "ProxyManager":
         proxy_string = proxy_string or ""
         proxies = [p.strip() for p in re.split(r"[,;\n\r]+", proxy_string) if p.strip()]
@@ -151,6 +155,7 @@ class ProxyManager:
             healthcheck_url=healthcheck_url,
             healthcheck_timeout=healthcheck_timeout,
             healthcheck_interval=healthcheck_interval,
+            ssl_verify=ssl_verify,
         )
 
     @property
@@ -166,8 +171,6 @@ class ProxyManager:
     def _active_indexes(self) -> list[int]:
         if not self.has_proxies:
             return []
-        if self.mode == ProxyMode.SINGLE:
-            return [0] if 0 not in self.failed_proxies else []
         return [i for i in range(len(self.proxies)) if i not in self.failed_proxies]
 
     def _best_failover_index(self) -> Optional[int]:
@@ -184,7 +187,10 @@ class ProxyManager:
             return None
 
         if self.mode == ProxyMode.SINGLE:
-            self.current_index = 0
+            # В single сохраняем текущий адрес, но при его отказе разрешаем
+            # переход к следующему прокси из списка.
+            if self.current_index not in active:
+                self.current_index = active[0]
         elif self.mode == ProxyMode.FAILOVER:
             best = self._best_failover_index()
             if best is None:
@@ -198,7 +204,11 @@ class ProxyManager:
         elif self.mode == ProxyMode.RANDOM:
             self.current_index = random.choice(active)
         elif self.mode == ProxyMode.ROTATE:
-            self.current_index = self._next_active_index(step_from_current=True) or active[0]
+            if self._rotate_started:
+                self.current_index = self._next_active_index(step_from_current=True) or active[0]
+            elif self.current_index not in active:
+                self.current_index = active[0]
+            self._rotate_started = True
         else:
             # sticky: продолжаем использовать текущий, если он жив.
             if self.current_index not in active:
@@ -236,15 +246,6 @@ class ProxyManager:
         index = self.proxies.index(proxy)
         self.failure_counts[index] = self.failure_counts.get(index, 0) + 1
 
-        if self.mode == ProxyMode.SINGLE:
-            log.warning(
-                "Прокси %s дал ошибку в режиме single (ошибок: %d/%d), переключение отключено",
-                mask_proxy_url(proxy), self.failure_counts[index], self.max_failures,
-            )
-            if self.failure_counts[index] >= self.max_failures:
-                self.failed_proxies.add(index)
-            return
-
         self.failed_proxies.add(index)
         log.warning(
             "Прокси %s помечен как нерабочий (ошибок: %d/%d)",
@@ -261,6 +262,12 @@ class ProxyManager:
                     log.error("Нет доступных прокси для failover")
             else:
                 new_proxy = self.next_proxy()
+                if new_proxy is None and self.proxies:
+                    # Все адреса уже дали ошибку. Начинаем бесконечный новый
+                    # круг проверки вместо остановки приложения.
+                    self.failed_proxies.clear()
+                    new_proxy = self.next_proxy()
+                    log.warning("Все прокси недоступны — начинается новый круг проверки")
                 if new_proxy:
                     log.info("Переключение на прокси: %s", mask_proxy_url(new_proxy))
                 else:
@@ -299,12 +306,12 @@ class ProxyManager:
                     return False
                 connector = aiohttp_socks.ProxyConnector.from_url(proxy)
                 async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                    async with session.get(self.healthcheck_url) as response:
+                    async with session.get(self.healthcheck_url, ssl=self.ssl_verify) as response:
                         return response.status < 500
 
             if protocol in {"http", "https"}:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(self.healthcheck_url, proxy=proxy) as response:
+                    async with session.get(self.healthcheck_url, proxy=proxy, ssl=self.ssl_verify) as response:
                         return response.status < 500
 
             log.warning("Неизвестный протокол прокси для health-check: %s", protocol or "без схемы")
@@ -334,6 +341,13 @@ class ProxyManager:
             if best is not None and best != self.current_index:
                 self.current_index = best
                 log.info("Failover выбрал лучший живой прокси #%d: %s", best, mask_proxy_url(self.proxies[best]))
+        elif self.mode == ProxyMode.SINGLE and self.current_index in self.failed_proxies:
+            next_index = self._next_active_index(step_from_current=True)
+            if next_index is None:
+                self.failed_proxies.clear()
+                next_index = (self.current_index + 1) % len(self.proxies)
+            self.current_index = next_index
+            log.info("Single выбрал следующий прокси #%d: %s", next_index, mask_proxy_url(self.proxies[next_index]))
         return results
 
     async def start_healthcheck_loop(self) -> None:
@@ -396,6 +410,11 @@ class ProxyManager:
 
             if protocol in {"http", "https"}:
                 session = AiohttpSession(proxy=proxy)
+                if not self.ssl_verify:
+                    # Aiogram creates its own TCPConnector with the certifi CA bundle.
+                    # Explicit compatibility mode is required for proxies performing TLS inspection.
+                    session._connector_init["ssl"] = False
+                    log.warning("Проверка SSL отключена для Telegram-сессии через прокси")
                 log.info("Создана сессия с HTTP/HTTPS прокси: %s", mask_proxy_url(proxy))
                 return session
 
@@ -437,6 +456,7 @@ class ProxyManager:
             "mode": self.mode.value,
             "healthcheck_url": self.healthcheck_url,
             "healthcheck_interval": self.healthcheck_interval,
+            "ssl_verify": self.ssl_verify,
             "total": len(self.proxies),
             "active": len(self._active_indexes()),
             "current_index": self.current_index if self.proxies else None,
