@@ -26,7 +26,7 @@ from app.config import get_settings
 from app.external_payment_handlers import router as external_payment_router
 from app.faq import init_faq_tables
 from app.faq_handlers import router as faq_router
-from app.mailing import init_mailing_tables
+from app.mailing import init_mailing_tables, mailing_loop
 from app.proxy_manager import ProxyManager
 from app.products import enabled_product_modules
 from app.support import init_support_tables
@@ -154,12 +154,24 @@ async def main() -> None:
     dp.include_router(runtime.router)
 
     started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+    mailing_task: asyncio.Task[None] | None = None
     try:
         if runtime.settings.delete_webhook_on_start:
             log.info('Deleting webhook. drop_pending=%s', runtime.settings.drop_pending_updates)
             await bot.delete_webhook(drop_pending_updates=runtime.settings.drop_pending_updates)
         me = await bot.get_me()
         log.info('Bot started: @%s id=%s', me.username, me.id)
+        if runtime.settings.mailing_enabled:
+            mailing_task = asyncio.create_task(
+                mailing_loop(
+                    bot,
+                    runtime.settings.db_path,
+                    interval_seconds=runtime.settings.mailing_interval_seconds,
+                    lookback_hours=runtime.settings.mailing_lookback_hours,
+                    batch_size=runtime.settings.mailing_batch_size,
+                ),
+                name='mailing-loop',
+            )
         if runtime.settings.startup_alerts_enabled:
             await notify_admins(
                 bot,
@@ -172,6 +184,12 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         log.info('Stopping VPN bot')
+        if mailing_task:
+            mailing_task.cancel()
+            try:
+                await mailing_task
+            except asyncio.CancelledError:
+                pass
         if runtime.settings.shutdown_alerts_enabled:
             await notify_admins(bot, '🔴 <b>VPN bot остановлен</b>\n\nРежим: polling / local')
         await close_proxy_manager()

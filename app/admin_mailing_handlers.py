@@ -47,7 +47,8 @@ async def mailing_home(callback: CallbackQuery) -> None:
         f"Событий в журнале: <b>{stats['events']}</b>\n"
         f"Отправлено: <b>{stats['sent']}</b>\n"
         f"Ошибок: <b>{stats['errors']}</b>\n\n"
-        'Пока это настройки и dry-run. Автоотправку подключим отдельным безопасным циклом, чтобы бот случайно не стал спам-машиной с энтузиазмом офисного принтера.'
+        f"Автоотправка: <b>{'включена' if runtime.settings.mailing_enabled else 'выключена'}</b>\n"
+        f"Интервал: <b>{runtime.settings.mailing_interval_seconds} сек.</b>"
     )
     await callback.message.answer(text, reply_markup=admin_mailing_menu())
 

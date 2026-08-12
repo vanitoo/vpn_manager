@@ -85,6 +85,10 @@ class Settings:
     log_backup_count: int
     auto_setup_bot_menu: bool
     socks5_enabled: bool
+    mailing_enabled: bool
+    mailing_interval_seconds: int
+    mailing_lookback_hours: int
+    mailing_batch_size: int
 
 
 def get_settings() -> Settings:
@@ -156,4 +160,8 @@ def get_settings() -> Settings:
         log_backup_count=int(os.getenv('LOG_BACKUP_COUNT','5')),
         auto_setup_bot_menu=_bool(os.getenv('AUTO_SETUP_BOT_MENU'),True),
         socks5_enabled=_bool(os.getenv('SOCKS5_ENABLED'),False),
+        mailing_enabled=_bool(os.getenv('MAILING_ENABLED'),True),
+        mailing_interval_seconds=max(30, int(os.getenv('MAILING_INTERVAL_SECONDS','300'))),
+        mailing_lookback_hours=max(1, int(os.getenv('MAILING_LOOKBACK_HOURS','24'))),
+        mailing_batch_size=max(1, int(os.getenv('MAILING_BATCH_SIZE','50'))),
     )

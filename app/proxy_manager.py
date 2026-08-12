@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Proxy Manager v1.3.1
+Proxy Manager v1.3.2
 
 Универсальный менеджер прокси для aiogram/aiohttp.
 
@@ -33,6 +33,7 @@ Health-check:
 - check_proxy(proxy) проверяет конкретный прокси.
 - start_healthcheck_loop() запускает фоновую проверку упавших прокси.
 - Для failover режим отличается от sticky именно возвратом на primary после восстановления.
+- В sticky фоновая проверка опрашивает только текущий прокси; резервные проверяются только после его отказа.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ import aiohttp
 
 log = logging.getLogger(__name__)
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 
 class ProxyMode(str, Enum):
@@ -317,8 +318,40 @@ class ProxyManager:
             log.warning("Неизвестный протокол прокси для health-check: %s", protocol or "без схемы")
             return False
         except Exception as exc:
-            log.warning("Health-check failed for %s: %s", mask_proxy_url(proxy), exc)
+            log.warning("Health-check failed for %s: %s: %s", mask_proxy_url(proxy), type(exc).__name__, exc)
             return False
+
+    async def check_sticky(self) -> dict[int, bool]:
+        """Check only the selected proxy; probe alternatives only after its failure."""
+        if not self.has_proxies:
+            return {}
+
+        results: dict[int, bool] = {}
+        current = self.current_index
+        current_ok = await self.check_proxy(self.proxies[current])
+        results[current] = current_ok
+        if current_ok:
+            if current in self.failed_proxies or self.failure_counts.get(current, 0):
+                self.reset_proxy(self.proxies[current])
+            return results
+
+        self.failure_counts[current] = self.failure_counts.get(current, 0) + 1
+        self.failed_proxies.add(current)
+        for offset in range(1, len(self.proxies) + 1):
+            candidate = (current + offset) % len(self.proxies)
+            if candidate == current:
+                continue
+            ok = await self.check_proxy(self.proxies[candidate])
+            results[candidate] = ok
+            if ok:
+                self.reset_proxy(self.proxies[candidate])
+                self.current_index = candidate
+                log.info("Sticky switched to proxy #%d: %s", candidate, mask_proxy_url(self.proxies[candidate]))
+                return results
+            self.failure_counts[candidate] = self.failure_counts.get(candidate, 0) + 1
+            self.failed_proxies.add(candidate)
+        log.error("Sticky has no healthy proxies; keeping current proxy #%d", current)
+        return results
 
     async def check_all(self) -> dict[int, bool]:
         """Проверить все прокси и обновить их состояние."""
@@ -361,7 +394,10 @@ class ProxyManager:
             while True:
                 try:
                     await asyncio.sleep(self.healthcheck_interval)
-                    await self.check_all()
+                    if self.mode == ProxyMode.STICKY:
+                        await self.check_sticky()
+                    else:
+                        await self.check_all()
                 except asyncio.CancelledError:
                     raise
                 except Exception:

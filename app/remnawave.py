@@ -15,6 +15,46 @@ from app.config import Settings
 
 log = logging.getLogger(__name__)
 
+_SENSITIVE_LOG_KEYS = {
+    'authorization', 'cookie', 'password', 'token', 'secret', 'secretkey',
+    'apikey', 'accesstoken', 'refreshtoken', 'jwt', 'pubkey', 'sslcert',
+    'subscriptionurl', 'subscription_url', 'suburl', 'shortuuid',
+    'short_uuid', 'trojanpassword', 'sspassword', 'vlessuuid',
+}
+
+
+def _log_key(value: Any) -> str:
+    return re.sub(r'[^a-z0-9_]', '', str(value).lower())
+
+
+def _redact_for_log(value: Any) -> Any:
+    """Return a recursively sanitized copy suitable for DEBUG logs."""
+    if isinstance(value, dict):
+        return {
+            key: '***REDACTED***' if _log_key(key) in _SENSITIVE_LOG_KEYS else _redact_for_log(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_for_log(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_for_log(item) for item in value)
+    return value
+
+
+def _response_summary(data: Any) -> str:
+    payload = data.get('response', data) if isinstance(data, dict) else data
+    if isinstance(payload, dict):
+        parts = []
+        if isinstance(payload.get('total'), (int, float)):
+            parts.append(f"total={payload['total']}")
+        for key in ('users', 'nodes', 'internalSquads', 'squads', 'items', 'data'):
+            if isinstance(payload.get(key), list):
+                parts.append(f'{key}={len(payload[key])}')
+        return ' '.join(parts) or f'fields={len(payload)}'
+    if isinstance(payload, list):
+        return f'items={len(payload)}'
+    return f'type={type(payload).__name__}'
+
 
 @dataclass
 class RemnawaveAccess:
@@ -71,18 +111,20 @@ class RemnawaveClient:
         if not self.settings.remnawave_base_url:
             raise RuntimeError('REMNAWAVE_BASE_URL is empty')
         url = f"{self.settings.remnawave_base_url}{path}"
-        safe_payload = json_payload.copy() if isinstance(json_payload, dict) else None
-        log.info('Remnawave request: %s %s nginx_auth=%s payload=%s', method, path, self.settings.remnawave_nginx_auth_enabled, safe_payload)
+        log.info('Remnawave request: %s %s nginx_auth=%s', method, path, self.settings.remnawave_nginx_auth_enabled)
+        if json_payload is not None:
+            log.debug('Remnawave request payload: %s %s payload=%s', method, path, _redact_for_log(json_payload))
         async with aiohttp.ClientSession(headers=self._headers(), auth=self._basic_auth()) as session:
             async with session.request(method, url, json=json_payload, timeout=30) as resp:
                 text = await resp.text()
                 try:
                     data = await resp.json(content_type=None)
                 except Exception:
-                    data = {'raw': text[:1000]}
-                log.info('Remnawave response: %s %s -> HTTP %s body=%s', method, path, resp.status, str(data)[:1200])
+                    data = {'nonJsonResponse': True, 'length': len(text)}
+                log.info('Remnawave response: %s %s -> HTTP %s %s', method, path, resp.status, _response_summary(data))
+                log.debug('Remnawave response body: %s %s body=%s', method, path, _redact_for_log(data))
                 if resp.status not in expected_status:
-                    raise RuntimeError(f'Remnawave API {method} {path} HTTP {resp.status}: {data}')
+                    raise RuntimeError(f'Remnawave API {method} {path} HTTP {resp.status}: {_redact_for_log(data)}')
                 return resp.status, data if isinstance(data, dict) else {'response': data}
 
     @staticmethod
@@ -117,7 +159,8 @@ class RemnawaveClient:
                 else:
                     items = payload
                 if isinstance(items, list) and items:
-                    log.info('Remnawave squads discovered via %s: %s', path, items)
+                    log.info('Remnawave squads discovered via %s: count=%s', path, len(items))
+                    log.debug('Remnawave squads via %s: %s', path, _redact_for_log(items))
                     return [x for x in items if isinstance(x, dict)]
             except Exception as exc:
                 log.warning('Squad discovery failed for %s: %s', path, exc)
@@ -199,5 +242,5 @@ class RemnawaveClient:
             raise RuntimeError(f'Remnawave returned unexpected user payload: {data}')
         remnawave_user_id = str(user.get('uuid') or user.get('id') or '')
         subscription_url = self._subscription_url(user)
-        log.info('Remnawave user ready: telegram_id=%s uuid=%s subscription_url=%s', telegram_id, remnawave_user_id, subscription_url)
+        log.info('Remnawave user ready: telegram_id=%s uuid=%s subscription_url_set=%s', telegram_id, remnawave_user_id, bool(subscription_url))
         return RemnawaveAccess(remnawave_user_id=remnawave_user_id, subscription_url=subscription_url, raw=user)

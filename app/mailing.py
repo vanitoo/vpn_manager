@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import html
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiosqlite
+from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.db import now_iso
+
+log = logging.getLogger(__name__)
 
 DEFAULT_REMINDERS = [
     {'code': 'before_3d', 'title': 'За 3 дня', 'offset_hours': -72, 'is_enabled': 1, 'message': 'Ваш VPN-доступ истекает через 3 дня. Продлите подписку заранее, чтобы не потерять доступ.'},
@@ -97,3 +106,135 @@ async def reminder_stats(db_path: str) -> dict[str, int]:
             'sent': await count("SELECT COUNT(*) FROM reminder_events WHERE status='sent'"),
             'errors': await count("SELECT COUNT(*) FROM reminder_events WHERE status='error'"),
         }
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    try:
+        result = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    if result.tzinfo is None:
+        result = result.replace(tzinfo=timezone.utc)
+    return result.astimezone(timezone.utc)
+
+
+async def _due_reminders(db_path: str, *, now: datetime, lookback_hours: int, limit: int) -> list[dict[str, Any]]:
+    await init_mailing_tables(db_path)
+    earliest = now - timedelta(hours=max(1, lookback_hours))
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM reminder_rules WHERE is_enabled=1 ORDER BY offset_hours') as cur:
+            rules = [dict(row) for row in await cur.fetchall()]
+        async with db.execute("SELECT id, telegram_id, expires_at FROM subscriptions WHERE status='active' ORDER BY expires_at") as cur:
+            subscriptions = [dict(row) for row in await cur.fetchall()]
+        async with db.execute("SELECT code, telegram_id, subscription_id FROM reminder_events WHERE status IN ('sent','error')") as cur:
+            existing = {(row['code'], int(row['telegram_id']), int(row['subscription_id'])) for row in await cur.fetchall()}
+
+    due: list[dict[str, Any]] = []
+    for subscription in subscriptions:
+        expires_at = _parse_datetime(subscription['expires_at'])
+        if not expires_at:
+            continue
+        for rule in rules:
+            key = (str(rule['code']), int(subscription['telegram_id']), int(subscription['id']))
+            scheduled_for = expires_at + timedelta(hours=int(rule['offset_hours']))
+            if int(rule['offset_hours']) < 0 and now >= expires_at:
+                continue
+            if key not in existing and earliest <= scheduled_for <= now:
+                due.append({**rule, **subscription, 'scheduled_for': scheduled_for.isoformat()})
+                if len(due) >= limit:
+                    return due
+    return due
+
+
+async def _reserve_event(db_path: str, item: dict[str, Any]) -> int | None:
+    ts = now_iso()
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute('''
+            INSERT OR IGNORE INTO reminder_events
+                (code, telegram_id, subscription_id, scheduled_for, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'planned', ?, ?)
+        ''', (item['code'], item['telegram_id'], item['id'], item['scheduled_for'], ts, ts))
+        await db.commit()
+        if cursor.rowcount:
+            return int(cursor.lastrowid)
+        async with db.execute('''
+            SELECT id FROM reminder_events
+            WHERE code=? AND telegram_id=? AND subscription_id=? AND status='planned'
+        ''', (item['code'], item['telegram_id'], item['id'])) as existing:
+            row = await existing.fetchone()
+            return int(row[0]) if row else None
+
+
+async def _finish_event(db_path: str, event_id: int, *, status: str, error: str = '') -> None:
+    ts = now_iso()
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            'UPDATE reminder_events SET status=?, sent_at=?, error=?, updated_at=? WHERE id=?',
+            (status, ts if status == 'sent' else None, error[:1000] or None, ts, event_id),
+        )
+        await db.commit()
+
+
+async def send_due_reminders(
+    bot: Bot,
+    db_path: str,
+    *,
+    lookback_hours: int = 24,
+    batch_size: int = 50,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """Send due reminders once, reserving each event before Telegram delivery."""
+
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    items = await _due_reminders(db_path, now=current, lookback_hours=lookback_hours, limit=max(1, batch_size))
+    result = {'due': len(items), 'sent': 0, 'errors': 0}
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='Продлить VPN', callback_data='plans')],
+    ])
+    for item in items:
+        event_id = await _reserve_event(db_path, item)
+        if event_id is None:
+            continue
+        try:
+            await bot.send_message(int(item['telegram_id']), html.escape(str(item['message'])), reply_markup=keyboard)
+        except TelegramRetryAfter as exc:
+            await _finish_event(db_path, event_id, status='error', error=f'TelegramRetryAfter: {exc}')
+            result['errors'] += 1
+            log.warning('Mailing rate limited for %ss', exc.retry_after)
+            break
+        except (TelegramForbiddenError, TelegramBadRequest) as exc:
+            await _finish_event(db_path, event_id, status='error', error=f'{type(exc).__name__}: {exc}')
+            result['errors'] += 1
+        except Exception as exc:
+            await _finish_event(db_path, event_id, status='error', error=f'{type(exc).__name__}: {exc}')
+            result['errors'] += 1
+            log.exception('Cannot send reminder event %s', event_id)
+        else:
+            await _finish_event(db_path, event_id, status='sent')
+            result['sent'] += 1
+        await asyncio.sleep(0.05)
+    return result
+
+
+async def mailing_loop(
+    bot: Bot,
+    db_path: str,
+    *,
+    interval_seconds: int = 300,
+    lookback_hours: int = 24,
+    batch_size: int = 50,
+) -> None:
+    """Continuously deliver reminders; one failed cycle never stops the bot."""
+
+    log.info('Mailing loop started: interval=%ss lookback=%sh batch=%s', interval_seconds, lookback_hours, batch_size)
+    while True:
+        try:
+            result = await send_due_reminders(bot, db_path, lookback_hours=lookback_hours, batch_size=batch_size)
+            if result['due'] or result['errors']:
+                log.info('Mailing cycle: %s', result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('Mailing cycle failed')
+        await asyncio.sleep(max(30, interval_seconds))
