@@ -49,8 +49,10 @@ def traffic_used(row: dict[str, Any]) -> int:
                 return int(row[key])
             except Exception:
                 return 0
-    stat = row.get('traffic') or row.get('stat') or row.get('stats')
-    if isinstance(stat, dict):
+    for stat_name in ('userTraffic', 'user_traffic', 'traffic', 'stat', 'stats'):
+        stat = row.get(stat_name)
+        if not isinstance(stat, dict):
+            continue
         for key in keys:
             if stat.get(key) is not None:
                 try:

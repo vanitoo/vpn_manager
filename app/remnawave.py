@@ -220,7 +220,14 @@ class RemnawaveClient:
                 log.warning('Cannot parse current expireAt: %s', current.get('expireAt'))
 
         traffic_limit_bytes = int(traffic_gb) * 1024 * 1024 * 1024 if int(traffic_gb or 0) > 0 else None
-        payload: dict[str, Any] = {'status': 'ACTIVE', 'expireAt': self._to_iso(expire_at), 'activeInternalSquads': [squad_uuid], 'email': email, 'telegramId': int(telegram_id), 'description': f'Telegram VPN bot user {telegram_id}', 'trafficLimitStrategy': 'NO_RESET'}
+        configured_strategy = getattr(self.settings, 'remnawave_traffic_limit_strategy', 'MONTH').upper()
+        if configured_strategy not in {'NO_RESET', 'DAY', 'WEEK', 'MONTH'}:
+            raise RuntimeError(f'Unsupported REMNAWAVE_TRAFFIC_LIMIT_STRATEGY: {configured_strategy}')
+        payload: dict[str, Any] = {'status': 'ACTIVE', 'expireAt': self._to_iso(expire_at), 'activeInternalSquads': [squad_uuid], 'email': email, 'telegramId': int(telegram_id), 'description': f'Telegram VPN bot user {telegram_id}' }
+        # Preserve the per-user Remnawave strategy on extension. For a new user,
+        # explicitly apply the configured policy instead of the API's NO_RESET default.
+        if not current:
+            payload['trafficLimitStrategy'] = configured_strategy
         if traffic_limit_bytes is not None:
             payload['trafficLimitBytes'] = traffic_limit_bytes
         if getattr(self.settings, 'remnawave_hwid_device_limit', 0) > 0:

@@ -180,13 +180,17 @@ def admin_users_menu() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_user_menu(telegram_id: int, is_active: bool) -> InlineKeyboardMarkup:
+def admin_user_menu(telegram_id: int, is_active: bool, free_access_active: bool = False) -> InlineKeyboardMarkup:
     action = '🚫 Заблокировать' if is_active else '✅ Активировать'
     key = 'block' if is_active else 'activate'
+    free_button = (
+        InlineKeyboardButton(text='⛔ Отключить доступ другу', callback_data=f'admin:friend:revoke:{telegram_id}')
+        if free_access_active else
+        InlineKeyboardButton(text='🎁 Выдать другу', callback_data=f'admin:friend:plans:{telegram_id}')
+    )
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🎁 Выдать тест', callback_data=f'admin:trial:{telegram_id}')],
+        [free_button],
         [InlineKeyboardButton(text=action, callback_data=f'admin:{key}:{telegram_id}')],
-        [InlineKeyboardButton(text='🔄 Синхронизировать', callback_data=f'admin:sync:{telegram_id}')],
         [InlineKeyboardButton(text='← Пользователи', callback_data='admin:users')],
     ])
 

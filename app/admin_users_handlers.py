@@ -12,9 +12,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app import runtime
-from app.admin_db import find_user
+from app.admin_db import create_access_grant, find_user, get_active_access_grant, get_active_trial, has_other_active_subscription, revoke_access_grant
+from app.db import add_subscription, get_active_subscription, get_plan_by_id, upsert_user
 from app.keyboards import admin_menu, admin_user_menu
-from app.remna_admin import fmt_bytes, remna_users, squads_text, traffic_limit, traffic_used
+from app.remna_admin import fmt_bytes, list_admin_plans, remna_users, squads_text, traffic_limit, traffic_used
 from app.remnawave import RemnawaveClient
 
 router = Router()
@@ -333,14 +334,158 @@ async def user_card(callback: CallbackQuery) -> None:
         f"UUID: <code>{esc(remna_uuid(remote) or local.get('remnawave_user_id') or '-')}</code>\n"
         f"Status: {esc(remote.get('status') or '-')}\n"
         f"Squad: {esc(squads_text(remote))}\n"
-        f"Трафик: {fmt_bytes(traffic_used(remote))} / {fmt_bytes(traffic_limit(remote))}"
+        f"Трафик: {fmt_bytes(traffic_used(remote))} / {fmt_bytes(traffic_limit(remote))}\n"
+        f"Сброс трафика: {esc(remote.get('trafficLimitStrategy') or '-')}\n"
+        f"Последний сброс: {esc(str(remote.get('lastTrafficResetAt') or '-')[:19])}"
     )
     tg = local.get('telegram_id') or item.get('telegram_id')
     if tg:
-        markup = admin_user_menu(int(tg), status == 'active')
+        free_grant = await get_active_access_grant(runtime.settings.db_path, int(tg))
+        markup = admin_user_menu(int(tg), status == 'active', bool(free_grant))
     else:
         markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text='🔄 Синхронизировать Remnawave → Bot', callback_data='admin:remna:sync')],
             [InlineKeyboardButton(text='← Пользователи', callback_data='admin:users')],
         ])
     await callback.message.answer(text[:3900], reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith('admin:friend:plans:'))
+async def friend_access_plans(callback: CallbackQuery) -> None:
+    if not runtime.admin(callback):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    telegram_id = int(callback.data.rsplit(':', 1)[1])
+    if await get_active_access_grant(runtime.settings.db_path, telegram_id):
+        await callback.answer('Бесплатный доступ уже активен', show_alert=True)
+        return
+    active_subscription = await get_active_subscription(runtime.settings.db_path, telegram_id=telegram_id)
+    active_trial = await get_active_trial(runtime.settings.db_path, telegram_id)
+    if active_subscription and not active_trial:
+        await callback.answer('У пользователя уже есть активная подписка', show_alert=True)
+        return
+    cached = next((entry for entry in USER_CACHE.values() if int(entry.get('telegram_id') or 0) == telegram_id), {})
+    if effective_status(cached) == 'active' and not active_trial:
+        await callback.answer('У пользователя уже есть активный доступ в Remnawave', show_alert=True)
+        return
+    plans = [plan for plan in await list_admin_plans(runtime.settings.db_path) if int(plan.get('is_active', 0))]
+    if not plans:
+        await callback.answer('Сначала создайте служебный тариф', show_alert=True)
+        return
+    rows = []
+    for plan in plans:
+        traffic = 'безлимит' if int(plan.get('traffic_gb') or 0) == 0 else f"{plan['traffic_gb']} ГБ"
+        rows.append([InlineKeyboardButton(
+            text=f"{plan['title']} · {plan['duration_days']} дн. · {traffic}"[:60],
+            callback_data=f"admin:friend:grant:{telegram_id}:{plan['id']}",
+        )])
+    rows.append([InlineKeyboardButton(text='← Пользователи', callback_data='admin:users')])
+    await callback.answer()
+    await callback.message.answer(
+        '🎁 <b>Выдать доступ другу</b>\n\nВыберите служебный тариф. Оплата создаваться не будет.',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@router.callback_query(F.data.startswith('admin:friend:grant:'))
+async def friend_access_grant(callback: CallbackQuery) -> None:
+    if not runtime.admin(callback):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    _, _, _, telegram_raw, plan_raw = callback.data.split(':', 4)
+    telegram_id, plan_id = int(telegram_raw), int(plan_raw)
+    if await get_active_access_grant(runtime.settings.db_path, telegram_id):
+        await callback.answer('Бесплатный доступ уже активен', show_alert=True)
+        return
+    active_subscription = await get_active_subscription(runtime.settings.db_path, telegram_id=telegram_id)
+    active_trial = await get_active_trial(runtime.settings.db_path, telegram_id)
+    if active_subscription and not active_trial:
+        await callback.answer('У пользователя уже есть активная подписка', show_alert=True)
+        return
+    plan = await get_plan_by_id(runtime.settings.db_path, plan_id)
+    if not plan or int(plan.get('is_public', 1)) != 0 or not int(plan.get('is_active', 0)):
+        await callback.answer('Служебный тариф недоступен', show_alert=True)
+        return
+    cached = next((entry for entry in USER_CACHE.values() if int(entry.get('telegram_id') or 0) == telegram_id), {})
+    if effective_status(cached) == 'active' and not active_trial:
+        await callback.answer('У пользователя уже есть активный доступ в Remnawave', show_alert=True)
+        return
+    local = cached.get('local') or {}
+    remote = cached.get('remote') or {}
+    user = await upsert_user(
+        runtime.settings.db_path,
+        telegram_id=telegram_id,
+        username=local.get('username') or remote.get('username'),
+        full_name=local.get('full_name') or remote.get('email') or remote.get('username') or f'Друг {telegram_id}',
+    )
+    try:
+        access = await RemnawaveClient(runtime.settings).create_or_extend_user(
+            telegram_id=telegram_id,
+            username=user.get('username'),
+            duration_days=int(plan['duration_days']),
+            traffic_gb=int(plan.get('traffic_gb') or 0),
+        )
+        subscription_id = await add_subscription(
+            runtime.settings.db_path,
+            user_id=int(user['id']),
+            telegram_id=telegram_id,
+            plan_id=plan_id,
+            duration_days=int(plan['duration_days']),
+            traffic_limit_gb=int(plan.get('traffic_gb') or 0),
+            remnawave_user_id=access.remnawave_user_id,
+            subscription_url=access.subscription_url,
+        )
+        await create_access_grant(
+            runtime.settings.db_path,
+            telegram_id=telegram_id,
+            subscription_id=subscription_id,
+            plan_id=plan_id,
+            granted_by=callback.from_user.id,
+        )
+    except Exception as exc:
+        await callback.answer('Ошибка выдачи доступа', show_alert=True)
+        await callback.message.answer(f'❌ Не удалось выдать доступ:\n<code>{esc(type(exc).__name__ + ": " + str(exc))[:1500]}</code>')
+        return
+    await callback.answer('Доступ выдан')
+    trial_note = '\nОстаток тестового периода сохранён.' if active_trial else ''
+    await callback.message.answer(
+        f"✅ <b>Доступ другу выдан</b>\n\n"
+        f"Telegram ID: <code>{telegram_id}</code>\n"
+        f"Тариф: <b>{esc(plan['title'])}</b>\n"
+        f"Срок: <b>{plan['duration_days']} дней</b>\n"
+        f"Трафик: <b>{'безлимит' if int(plan.get('traffic_gb') or 0) == 0 else str(plan['traffic_gb']) + ' ГБ'}</b>\n"
+        f"Оплата: <b>не требуется</b>{trial_note}",
+        reply_markup=admin_user_menu(telegram_id, True, True),
+    )
+
+
+@router.callback_query(F.data.startswith('admin:friend:revoke:'))
+async def friend_access_revoke(callback: CallbackQuery) -> None:
+    if not runtime.admin(callback):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    telegram_id = int(callback.data.rsplit(':', 1)[1])
+    grant = await revoke_access_grant(runtime.settings.db_path, telegram_id)
+    if not grant:
+        await callback.answer('Активная бесплатная выдача не найдена', show_alert=True)
+        return
+    remna_uuid_value = str(grant.get('remnawave_user_id') or '')
+    has_other_access = await has_other_active_subscription(
+        runtime.settings.db_path, telegram_id, int(grant['subscription_id'])
+    )
+    if remna_uuid_value and not has_other_access:
+        try:
+            await RemnawaveClient(runtime.settings)._request(
+                'PATCH', '/api/users',
+                json_payload={'uuid': remna_uuid_value, 'status': 'DISABLED'},
+                expected_status=(200, 201),
+            )
+        except Exception as exc:
+            await callback.answer('Локально отключено, ошибка Remnawave', show_alert=True)
+            await callback.message.answer(f'⚠️ Локальная выдача закрыта, но Remnawave не ответила:\n<code>{esc(type(exc).__name__ + ": " + str(exc))[:1200]}</code>')
+            return
+    await callback.answer('Доступ отключён')
+    await callback.message.answer(
+        f'⛔ Бесплатный доступ пользователя <code>{telegram_id}</code> отключён.',
+        reply_markup=admin_user_menu(telegram_id, False, False),
+    )

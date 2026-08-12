@@ -21,14 +21,98 @@ async def init_admin_tables(db_path: str) -> None:
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_trials_telegram_id ON trials(telegram_id);
+        CREATE TABLE IF NOT EXISTS access_grants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            subscription_id INTEGER NOT NULL,
+            plan_id INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'friend',
+            granted_by INTEGER NOT NULL,
+            granted_at TEXT NOT NULL,
+            revoked_at TEXT,
+            status TEXT NOT NULL DEFAULT 'active'
+        );
+        CREATE INDEX IF NOT EXISTS idx_access_grants_active
+            ON access_grants(telegram_id, status);
         ''')
         await db.commit()
+
+
+async def get_active_access_grant(db_path: str, telegram_id: int) -> dict[str, Any] | None:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT g.*, p.title AS plan_title, s.expires_at, s.remnawave_user_id
+            FROM access_grants g
+            JOIN plans p ON p.id=g.plan_id
+            JOIN subscriptions s ON s.id=g.subscription_id
+            WHERE g.telegram_id=? AND g.status='active' AND s.status='active'
+            ORDER BY g.id DESC LIMIT 1
+        ''', (telegram_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def create_access_grant(
+    db_path: str, *, telegram_id: int, subscription_id: int, plan_id: int, granted_by: int
+) -> int:
+    ts = now_iso()
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute('''
+            INSERT INTO access_grants
+                (telegram_id, subscription_id, plan_id, kind, granted_by, granted_at, status)
+            VALUES (?, ?, ?, 'friend', ?, ?, 'active')
+        ''', (telegram_id, subscription_id, plan_id, granted_by, ts))
+        await db.commit()
+        return int(cursor.lastrowid)
+
+
+async def revoke_access_grant(db_path: str, telegram_id: int) -> dict[str, Any] | None:
+    grant = await get_active_access_grant(db_path, telegram_id)
+    if not grant:
+        return None
+    ts = now_iso()
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            "UPDATE access_grants SET status='revoked', revoked_at=? WHERE id=?",
+            (ts, grant['id']),
+        )
+        await db.execute(
+            "UPDATE subscriptions SET status='blocked', updated_at=? WHERE id=?",
+            (ts, grant['subscription_id']),
+        )
+        await db.commit()
+    return grant
+
+
+async def has_other_active_subscription(db_path: str, telegram_id: int, excluded_subscription_id: int) -> bool:
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute('''
+            SELECT 1 FROM subscriptions
+            WHERE telegram_id=? AND id<>? AND status='active' AND expires_at>?
+            LIMIT 1
+        ''', (telegram_id, excluded_subscription_id, now_iso())) as cur:
+            return await cur.fetchone() is not None
 
 
 async def has_used_trial(db_path: str, telegram_id: int) -> bool:
     async with aiosqlite.connect(db_path) as db:
         async with db.execute('SELECT 1 FROM trials WHERE telegram_id=? LIMIT 1', (telegram_id,)) as cur:
             return await cur.fetchone() is not None
+
+
+async def get_active_trial(db_path: str, telegram_id: int) -> dict[str, Any] | None:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT t.*, s.status AS subscription_status, s.expires_at
+            FROM trials t
+            JOIN subscriptions s ON s.id=t.subscription_id
+            WHERE t.telegram_id=? AND s.status='active' AND s.expires_at>?
+            LIMIT 1
+        ''', (telegram_id, now_iso())) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 async def mark_trial_used(db_path: str, telegram_id: int, subscription_id: int | None) -> None:

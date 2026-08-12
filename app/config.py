@@ -68,6 +68,7 @@ class Settings:
     remnawave_subscription_base_url: str
     remnawave_default_traffic_gb: int
     remnawave_hwid_device_limit: int
+    remnawave_traffic_limit_strategy: str
     remnawave_nginx_auth_enabled: bool
     remnawave_nginx_cookie_name: str
     remnawave_nginx_cookie_value: str
@@ -145,6 +146,7 @@ def get_settings() -> Settings:
         remnawave_subscription_base_url=os.getenv('REMNAWAVE_SUBSCRIPTION_BASE_URL','').strip().rstrip('/'),
         remnawave_default_traffic_gb=int(os.getenv('REMNAWAVE_DEFAULT_TRAFFIC_GB','0')),
         remnawave_hwid_device_limit=int(os.getenv('REMNAWAVE_HWID_DEVICE_LIMIT','0')),
+        remnawave_traffic_limit_strategy=os.getenv('REMNAWAVE_TRAFFIC_LIMIT_STRATEGY','MONTH').strip().upper(),
         remnawave_nginx_auth_enabled=_bool(os.getenv('REMNAWAVE_NGINX_AUTH_ENABLED'),False),
         remnawave_nginx_cookie_name=os.getenv('REMNAWAVE_NGINX_COOKIE_NAME','').strip(),
         remnawave_nginx_cookie_value=os.getenv('REMNAWAVE_NGINX_COOKIE_VALUE','').strip(),
