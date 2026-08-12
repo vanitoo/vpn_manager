@@ -28,6 +28,7 @@ from app.faq import init_faq_tables
 from app.faq_handlers import router as faq_router
 from app.mailing import init_mailing_tables
 from app.proxy_manager import ProxyManager
+from app.products import enabled_product_modules
 from app.support import init_support_tables
 from app.support.routes import router as support_router
 from app.user_vpn_handlers import router as user_vpn_router
@@ -144,6 +145,12 @@ async def main() -> None:
     dp.include_router(admin_mailing_router)
     dp.include_router(admin_plan_router)
     dp.include_router(admin_remna_router)
+    for product_module in enabled_product_modules(socks5_enabled=runtime.settings.socks5_enabled):
+        if product_module.initialize:
+            await product_module.initialize(runtime.settings.db_path)
+        for product_router in product_module.routers:
+            dp.include_router(product_router)
+        log.info('Product module enabled: %s', product_module.code)
     dp.include_router(runtime.router)
 
     started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')

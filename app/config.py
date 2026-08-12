@@ -84,6 +84,7 @@ class Settings:
     log_max_bytes: int
     log_backup_count: int
     auto_setup_bot_menu: bool
+    socks5_enabled: bool
 
 
 def get_settings() -> Settings:
@@ -154,4 +155,5 @@ def get_settings() -> Settings:
         log_max_bytes=int(os.getenv('LOG_MAX_BYTES',str(10*1024*1024))),
         log_backup_count=int(os.getenv('LOG_BACKUP_COUNT','5')),
         auto_setup_bot_menu=_bool(os.getenv('AUTO_SETUP_BOT_MENU'),True),
+        socks5_enabled=_bool(os.getenv('SOCKS5_ENABLED'),False),
     )
