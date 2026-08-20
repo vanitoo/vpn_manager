@@ -29,6 +29,9 @@ from app.faq_handlers import router as faq_router
 from app.mailing import init_mailing_tables, mailing_loop
 from app.proxy_manager import ProxyManager
 from app.products import enabled_product_modules
+from app.start_content import init_start_content
+from app.start_content_handlers import router as start_content_admin_router
+from app.start_screen_handlers import router as start_screen_router
 from app.support import init_support_tables
 from app.support.routes import router as support_router
 from app.user_vpn_handlers import router as user_vpn_router
@@ -50,34 +53,18 @@ class DeleteOldMenuMiddleware(BaseMiddleware):
 
 def setup_logging() -> None:
     Path(runtime.settings.log_file).parent.mkdir(parents=True, exist_ok=True)
-    root = logging.getLogger()
-    root.setLevel(getattr(logging, runtime.settings.log_level, logging.INFO))
-    root.handlers.clear()
+    root = logging.getLogger(); root.setLevel(getattr(logging, runtime.settings.log_level, logging.INFO)); root.handlers.clear()
     fmt = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
-    console = logging.StreamHandler()
-    console.setFormatter(fmt)
-    root.addHandler(console)
-    file_handler = RotatingFileHandler(runtime.settings.log_file, maxBytes=runtime.settings.log_max_bytes, backupCount=runtime.settings.log_backup_count, encoding='utf-8')
-    file_handler.setFormatter(fmt)
-    root.addHandler(file_handler)
-    logging.getLogger('aiogram').setLevel(logging.INFO)
-    logging.getLogger('aiohttp').setLevel(logging.INFO)
+    console = logging.StreamHandler(); console.setFormatter(fmt); root.addHandler(console)
+    file_handler = RotatingFileHandler(runtime.settings.log_file, maxBytes=runtime.settings.log_max_bytes, backupCount=runtime.settings.log_backup_count, encoding='utf-8'); file_handler.setFormatter(fmt); root.addHandler(file_handler)
+    logging.getLogger('aiogram').setLevel(logging.INFO); logging.getLogger('aiohttp').setLevel(logging.INFO)
 
 
 async def setup_commands(bot: Bot) -> None:
-    public = [
-        BotCommand(command='start', description='Главное меню'),
-        BotCommand(command='cancel', description='Отменить текущее действие'),
-    ]
+    public = [BotCommand(command='start', description='Главное меню'), BotCommand(command='cancel', description='Отменить текущее действие')]
     await bot.set_my_commands(public, scope=BotCommandScopeDefault())
     for admin_id in runtime.settings.admin_ids:
-        await bot.set_my_commands(
-            public + [
-                BotCommand(command='admin', description='Админка'),
-                BotCommand(command='backup', description='Создать бэкап'),
-            ],
-            scope=BotCommandScopeChat(chat_id=admin_id),
-        )
+        await bot.set_my_commands(public + [BotCommand(command='admin', description='Админка'), BotCommand(command='backup', description='Создать бэкап')], scope=BotCommandScopeChat(chat_id=admin_id))
     log.info('Telegram commands registered. Admin IDs: %s', runtime.settings.admin_ids)
 
 
@@ -85,12 +72,10 @@ async def make_bot() -> Bot:
     global proxy_manager
     proxy_manager = ProxyManager.from_env_string(runtime.settings.proxy, mode=runtime.settings.proxy_mode, healthcheck_url=runtime.settings.proxy_healthcheck_url, healthcheck_timeout=runtime.settings.proxy_healthcheck_timeout, healthcheck_interval=runtime.settings.proxy_healthcheck_interval)
     log.info('Proxy mode=%s has_proxies=%s', runtime.settings.proxy_mode, proxy_manager.has_proxies)
-    if proxy_manager.has_proxies:
-        await proxy_manager.check_all()
+    if proxy_manager.has_proxies: await proxy_manager.check_all()
     session = proxy_manager.get_session() or proxy_manager.get_session_sync()
     if session:
-        await proxy_manager.start_healthcheck_loop()
-        log.info('Telegram API session: proxy')
+        await proxy_manager.start_healthcheck_loop(); log.info('Telegram API session: proxy')
         return Bot(runtime.settings.bot_token, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     log.info('Telegram API session: direct')
     return Bot(runtime.settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -98,105 +83,59 @@ async def make_bot() -> Bot:
 
 async def notify_admins(bot: Bot, text: str) -> None:
     for admin_id in runtime.settings.admin_ids:
-        try:
-            await bot.send_message(admin_id, text)
-        except Exception:
-            log.exception('Cannot send lifecycle alert to admin %s', admin_id)
+        try: await bot.send_message(admin_id, text)
+        except Exception: log.exception('Cannot send lifecycle alert to admin %s', admin_id)
 
 
 async def close_proxy_manager() -> None:
-    if not proxy_manager:
-        return
+    if not proxy_manager: return
     close = getattr(proxy_manager, 'close', None)
     if callable(close):
         result = close()
-        if hasattr(result, '__await__'):
-            await result
+        if hasattr(result, '__await__'): await result
 
 
 async def main() -> None:
-    runtime.settings = get_settings()
-    setup_logging()
+    runtime.settings = get_settings(); setup_logging()
     log.info('Starting %s build=%s', version_line(), BUILD_DATE)
     log.info('DB=%s LOG=%s', runtime.settings.db_path, runtime.settings.log_file)
     log.info('Payments=%s', runtime.settings.payment_providers)
     log.info('Remnawave base=%s token_set=%s squad_set=%s', runtime.settings.remnawave_base_url, bool(runtime.settings.remnawave_api_token), bool(runtime.settings.remnawave_internal_squad_uuid))
 
-    await runtime.init_db(runtime.settings.db_path)
-    await runtime.init_admin_tables(runtime.settings.db_path)
-    await init_mailing_tables(runtime.settings.db_path)
-    await init_faq_tables(runtime.settings.db_path)
-    await init_support_tables(runtime.settings.db_path)
+    await runtime.init_db(runtime.settings.db_path); await runtime.init_admin_tables(runtime.settings.db_path)
+    await init_mailing_tables(runtime.settings.db_path); await init_faq_tables(runtime.settings.db_path); await init_support_tables(runtime.settings.db_path); await init_start_content(runtime.settings.db_path)
     await runtime.seed_plans(runtime.settings.db_path, runtime.DEFAULT_PLANS)
 
-    bot = await make_bot()
-    await setup_commands(bot)
-
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
-    dp.include_router(common_fsm_router)
-    dp.include_router(support_router)
-    dp.include_router(user_vpn_router)
-    dp.include_router(faq_router)
-    dp.include_router(external_payment_router)
-    dp.include_router(backup_router)
-    dp.include_router(admin_users_router)
-    dp.include_router(admin_ops_router)
-    dp.include_router(admin_squads_router)
-    dp.include_router(admin_mailing_router)
-    dp.include_router(admin_plan_router)
-    dp.include_router(admin_remna_router)
+    bot = await make_bot(); await setup_commands(bot)
+    dp = Dispatcher(storage=MemoryStorage()); dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
+    dp.include_router(common_fsm_router); dp.include_router(support_router); dp.include_router(user_vpn_router); dp.include_router(faq_router); dp.include_router(external_payment_router); dp.include_router(backup_router)
+    dp.include_router(start_content_admin_router)
+    dp.include_router(admin_users_router); dp.include_router(admin_ops_router); dp.include_router(admin_squads_router); dp.include_router(admin_mailing_router); dp.include_router(admin_plan_router); dp.include_router(admin_remna_router)
+    dp.include_router(start_screen_router)
     for product_module in enabled_product_modules(socks5_enabled=runtime.settings.socks5_enabled):
-        if product_module.initialize:
-            await product_module.initialize(runtime.settings.db_path)
-        for product_router in product_module.routers:
-            dp.include_router(product_router)
+        if product_module.initialize: await product_module.initialize(runtime.settings.db_path)
+        for product_router in product_module.routers: dp.include_router(product_router)
         log.info('Product module enabled: %s', product_module.code)
     dp.include_router(runtime.router)
 
-    started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-    mailing_task: asyncio.Task[None] | None = None
+    started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'); mailing_task: asyncio.Task[None] | None = None
     try:
         if runtime.settings.delete_webhook_on_start:
-            log.info('Deleting webhook. drop_pending=%s', runtime.settings.drop_pending_updates)
-            await bot.delete_webhook(drop_pending_updates=runtime.settings.drop_pending_updates)
-        me = await bot.get_me()
-        log.info('Bot started: @%s id=%s version=%s', me.username, me.id, APP_VERSION)
+            log.info('Deleting webhook. drop_pending=%s', runtime.settings.drop_pending_updates); await bot.delete_webhook(drop_pending_updates=runtime.settings.drop_pending_updates)
+        me = await bot.get_me(); log.info('Bot started: @%s id=%s version=%s', me.username, me.id, APP_VERSION)
         if runtime.settings.mailing_enabled:
-            mailing_task = asyncio.create_task(
-                mailing_loop(
-                    bot,
-                    runtime.settings.db_path,
-                    interval_seconds=runtime.settings.mailing_interval_seconds,
-                    lookback_hours=runtime.settings.mailing_lookback_hours,
-                    batch_size=runtime.settings.mailing_batch_size,
-                ),
-                name='mailing-loop',
-            )
+            mailing_task = asyncio.create_task(mailing_loop(bot, runtime.settings.db_path, interval_seconds=runtime.settings.mailing_interval_seconds, lookback_hours=runtime.settings.mailing_lookback_hours, batch_size=runtime.settings.mailing_batch_size), name='mailing-loop')
         if runtime.settings.startup_alerts_enabled:
-            await notify_admins(
-                bot,
-                f'🟢 <b>{version_line()} запущен</b>\n\n'
-                f'Build: <code>{BUILD_DATE}</code>\n'
-                f'Bot: @{me.username}\n'
-                f'Режим: <b>polling / local</b>\n'
-                f'Платежи: <code>{", ".join(runtime.settings.payment_providers)}</code>\n'
-                f'Время: <code>{started_at}</code>',
-            )
+            await notify_admins(bot, f'🟢 <b>{version_line()} запущен</b>\n\nBuild: <code>{BUILD_DATE}</code>\nBot: @{me.username}\nРежим: <b>polling / local</b>\nПлатежи: <code>{", ".join(runtime.settings.payment_providers)}</code>\nВремя: <code>{started_at}</code>')
         await dp.start_polling(bot)
     finally:
         log.info('Stopping %s', version_line())
         if mailing_task:
             mailing_task.cancel()
-            try:
-                await mailing_task
-            except asyncio.CancelledError:
-                pass
-        if runtime.settings.shutdown_alerts_enabled:
-            await notify_admins(bot, f'🔴 <b>{version_line()} остановлен</b>\n\nРежим: polling / local')
-        await close_proxy_manager()
-        await bot.session.close()
+            try: await mailing_task
+            except asyncio.CancelledError: pass
+        if runtime.settings.shutdown_alerts_enabled: await notify_admins(bot, f'🔴 <b>{version_line()} остановлен</b>\n\nРежим: polling / local')
+        await close_proxy_manager(); await bot.session.close()
 
 
-if __name__ == '__main__':
-    asyncio.run(main())
+if __name__ == '__main__': asyncio.run(main())
