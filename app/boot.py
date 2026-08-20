@@ -32,6 +32,7 @@ from app.products import enabled_product_modules
 from app.support import init_support_tables
 from app.support.routes import router as support_router
 from app.user_vpn_handlers import router as user_vpn_router
+from app.version import APP_VERSION, BUILD_DATE, version_line
 
 log = logging.getLogger(__name__)
 proxy_manager: ProxyManager | None = None
@@ -116,7 +117,7 @@ async def close_proxy_manager() -> None:
 async def main() -> None:
     runtime.settings = get_settings()
     setup_logging()
-    log.info('Starting VPN bot')
+    log.info('Starting %s build=%s', version_line(), BUILD_DATE)
     log.info('DB=%s LOG=%s', runtime.settings.db_path, runtime.settings.log_file)
     log.info('Payments=%s', runtime.settings.payment_providers)
     log.info('Remnawave base=%s token_set=%s squad_set=%s', runtime.settings.remnawave_base_url, bool(runtime.settings.remnawave_api_token), bool(runtime.settings.remnawave_internal_squad_uuid))
@@ -160,7 +161,7 @@ async def main() -> None:
             log.info('Deleting webhook. drop_pending=%s', runtime.settings.drop_pending_updates)
             await bot.delete_webhook(drop_pending_updates=runtime.settings.drop_pending_updates)
         me = await bot.get_me()
-        log.info('Bot started: @%s id=%s', me.username, me.id)
+        log.info('Bot started: @%s id=%s version=%s', me.username, me.id, APP_VERSION)
         if runtime.settings.mailing_enabled:
             mailing_task = asyncio.create_task(
                 mailing_loop(
@@ -175,7 +176,8 @@ async def main() -> None:
         if runtime.settings.startup_alerts_enabled:
             await notify_admins(
                 bot,
-                f'🟢 <b>VPN bot запущен</b>\n\n'
+                f'🟢 <b>{version_line()} запущен</b>\n\n'
+                f'Build: <code>{BUILD_DATE}</code>\n'
                 f'Bot: @{me.username}\n'
                 f'Режим: <b>polling / local</b>\n'
                 f'Платежи: <code>{", ".join(runtime.settings.payment_providers)}</code>\n'
@@ -183,7 +185,7 @@ async def main() -> None:
             )
         await dp.start_polling(bot)
     finally:
-        log.info('Stopping VPN bot')
+        log.info('Stopping %s', version_line())
         if mailing_task:
             mailing_task.cancel()
             try:
@@ -191,7 +193,7 @@ async def main() -> None:
             except asyncio.CancelledError:
                 pass
         if runtime.settings.shutdown_alerts_enabled:
-            await notify_admins(bot, '🔴 <b>VPN bot остановлен</b>\n\nРежим: polling / local')
+            await notify_admins(bot, f'🔴 <b>{version_line()} остановлен</b>\n\nРежим: polling / local')
         await close_proxy_manager()
         await bot.session.close()
 
