@@ -36,31 +36,20 @@ def payment_methods_menu(plan_id: int, providers: list[str]) -> InlineKeyboardMa
 
 
 def external_payment_menu(payment_id: int, payment_url: str, plan_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='Оплатить', url=payment_url)],
-        [InlineKeyboardButton(text='Я оплатил', callback_data=f'epay:check:{payment_id}')],
-        [InlineKeyboardButton(text='← К тарифу', callback_data=f'plan:{plan_id}')],
-        [InlineKeyboardButton(text='⌂ Главное', callback_data='home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Оплатить', url=payment_url)],[InlineKeyboardButton(text='Я оплатил', callback_data=f'epay:check:{payment_id}')],[InlineKeyboardButton(text='← К тарифу', callback_data=f'plan:{plan_id}')],[InlineKeyboardButton(text='⌂ Главное', callback_data='home')]])
 
 
 def after_purchase_menu(subscription_url: str = '') -> InlineKeyboardMarkup:
     rows = []
-    if subscription_url:
-        rows.append([InlineKeyboardButton(text='🚀 Открыть VPN-подписку', url=subscription_url)])
+    if subscription_url: rows.append([InlineKeyboardButton(text='🚀 Открыть VPN-подписку', url=subscription_url)])
     rows += [[InlineKeyboardButton(text='🔑 Мой VPN', callback_data='my_vpn')], [InlineKeyboardButton(text='⌂ Главное', callback_data='home')]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def my_vpn_menu(*, subscription_url: str = '', happ_url: str = '') -> InlineKeyboardMarkup:
     rows = []
-    if subscription_url:
-        rows.append([InlineKeyboardButton(text='🚀 Открыть VPN-подписку', url=subscription_url)])
-    rows += [
-        [InlineKeyboardButton(text='💳 Продлить', callback_data='plans')],
-        [InlineKeyboardButton(text='❓ Помощь', callback_data='help')],
-        [InlineKeyboardButton(text='⌂ Главное', callback_data='home')],
-    ]
+    if subscription_url: rows.append([InlineKeyboardButton(text='🚀 Открыть VPN-подписку', url=subscription_url)])
+    rows += [[InlineKeyboardButton(text='💳 Продлить', callback_data='plans')],[InlineKeyboardButton(text='❓ Помощь', callback_data='help')],[InlineKeyboardButton(text='⌂ Главное', callback_data='home')]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -75,11 +64,7 @@ def faq_list_menu(items: list[dict]) -> InlineKeyboardMarkup:
 
 
 def faq_item_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='← FAQ', callback_data='faq')],
-        [InlineKeyboardButton(text='← Помощь', callback_data='help')],
-        [InlineKeyboardButton(text='⌂ Главное', callback_data='home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='← FAQ', callback_data='faq')],[InlineKeyboardButton(text='← Помощь', callback_data='help')],[InlineKeyboardButton(text='⌂ Главное', callback_data='home')]])
 
 
 def admin_menu() -> InlineKeyboardMarkup:
@@ -88,9 +73,22 @@ def admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text='👥 Пользователи', callback_data='admin:users'), InlineKeyboardButton(text='💰 Тарифы', callback_data='admin:plans')],
         [InlineKeyboardButton(text='🖥 Ноды', callback_data='admin:nodes'), InlineKeyboardButton(text='🧩 Squads', callback_data='admin:squads')],
         [InlineKeyboardButton(text='🛟 Поддержка', callback_data='admin:support'), InlineKeyboardButton(text='📣 Рассылки', callback_data='admin:mailing')],
-        [InlineKeyboardButton(text='❓ FAQ', callback_data='admin:faq'), InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs')],
-        [InlineKeyboardButton(text='ℹ️ Система', callback_data='admin:system'), InlineKeyboardButton(text='🌍 Remnawave', callback_data='admin:remna')],
+        [InlineKeyboardButton(text='❓ FAQ', callback_data='admin:faq'), InlineKeyboardButton(text='👋 Старт /start', callback_data='admin:start')],
+        [InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs'), InlineKeyboardButton(text='ℹ️ Система', callback_data='admin:system')],
+        [InlineKeyboardButton(text='🌍 Remnawave', callback_data='admin:remna')],
     ])
+
+
+def admin_start_content_menu(enabled: bool, image_enabled: bool, has_image: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text='⛔ Выключить экран' if enabled else '✅ Включить экран', callback_data='admin:start:toggle')],
+        [InlineKeyboardButton(text='✏️ Текст без VPN', callback_data='admin:start:guest'), InlineKeyboardButton(text='✏️ Текст с VPN', callback_data='admin:start:active')],
+        [InlineKeyboardButton(text='🖼 Загрузить картинку', callback_data='admin:start:image')],
+        [InlineKeyboardButton(text='🙈 Выключить картинку' if image_enabled else '👁 Включить картинку', callback_data='admin:start:image-toggle')],
+    ]
+    if has_image: rows.append([InlineKeyboardButton(text='🗑 Удалить картинку', callback_data='admin:start:image-delete')])
+    rows.append([InlineKeyboardButton(text='← Админка', callback_data='admin:home')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_faq_menu(items: list[dict]) -> InlineKeyboardMarkup:
@@ -100,100 +98,46 @@ def admin_faq_menu(items: list[dict]) -> InlineKeyboardMarkup:
 
 
 def admin_faq_item_menu(item_id: int, is_active: bool) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='✏️ Вопрос', callback_data=f'admin:faq:editq:{item_id}'), InlineKeyboardButton(text='✏️ Ответ', callback_data=f'admin:faq:edita:{item_id}')],
-        [InlineKeyboardButton(text='⛔ Скрыть' if is_active else '✅ Показать', callback_data=f'admin:faq:toggle:{item_id}')],
-        [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'admin:faq:delete:{item_id}')],
-        [InlineKeyboardButton(text='← FAQ', callback_data='admin:faq')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='✏️ Вопрос', callback_data=f'admin:faq:editq:{item_id}'), InlineKeyboardButton(text='✏️ Ответ', callback_data=f'admin:faq:edita:{item_id}')],[InlineKeyboardButton(text='⛔ Скрыть' if is_active else '✅ Показать', callback_data=f'admin:faq:toggle:{item_id}')],[InlineKeyboardButton(text='🗑 Удалить', callback_data=f'admin:faq:delete:{item_id}')],[InlineKeyboardButton(text='← FAQ', callback_data='admin:faq')]])
 
 
 def admin_logs_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='📄 Последние 50 строк', callback_data='admin:logs:tail')],
-        [InlineKeyboardButton(text='⚠️ Ошибки', callback_data='admin:logs:errors')],
-        [InlineKeyboardButton(text='🧹 Размеры логов', callback_data='admin:logs:size')],
-        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='📄 Последние 50 строк', callback_data='admin:logs:tail')],[InlineKeyboardButton(text='⚠️ Ошибки', callback_data='admin:logs:errors')],[InlineKeyboardButton(text='🧹 Размеры логов', callback_data='admin:logs:size')],[InlineKeyboardButton(text='← Админка', callback_data='admin:home')]])
 
 
 def admin_nodes_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🖥 Список нод', callback_data='admin:nodes:list')],
-        [InlineKeyboardButton(text='🩺 Проверка доступности', callback_data='admin:nodes:health')],
-        [InlineKeyboardButton(text='🧭 Идея управления нодами', callback_data='admin:nodes:roadmap')],
-        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🖥 Список нод', callback_data='admin:nodes:list')],[InlineKeyboardButton(text='🩺 Проверка доступности', callback_data='admin:nodes:health')],[InlineKeyboardButton(text='🧭 Идея управления нодами', callback_data='admin:nodes:roadmap')],[InlineKeyboardButton(text='← Админка', callback_data='admin:home')]])
 
 
 def admin_squads_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='📊 Статистика по squads', callback_data='admin:squads:stats')],
-        [InlineKeyboardButton(text='📋 Список squads', callback_data='admin:squads:list')],
-        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='📊 Статистика по squads', callback_data='admin:squads:stats')],[InlineKeyboardButton(text='📋 Список squads', callback_data='admin:squads:list')],[InlineKeyboardButton(text='← Админка', callback_data='admin:home')]])
 
 
 def admin_mailing_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='⚙️ Правила напоминаний', callback_data='admin:mailing:rules')],
-        [InlineKeyboardButton(text='📊 Статистика рассылок', callback_data='admin:mailing:stats')],
-        [InlineKeyboardButton(text='🧪 Dry-run ближайших уведомлений', callback_data='admin:mailing:dryrun')],
-        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⚙️ Правила напоминаний', callback_data='admin:mailing:rules')],[InlineKeyboardButton(text='📊 Статистика рассылок', callback_data='admin:mailing:stats')],[InlineKeyboardButton(text='🧪 Dry-run ближайших уведомлений', callback_data='admin:mailing:dryrun')],[InlineKeyboardButton(text='← Админка', callback_data='admin:home')]])
 
 
 def reminder_rule_menu(code: str, enabled: bool) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='⛔ Выключить' if enabled else '✅ Включить', callback_data=f'admin:mailing:toggle:{code}')],
-        [InlineKeyboardButton(text='✏️ Изменить текст', callback_data=f'admin:mailing:edit:{code}')],
-        [InlineKeyboardButton(text='← Правила', callback_data='admin:mailing:rules')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⛔ Выключить' if enabled else '✅ Включить', callback_data=f'admin:mailing:toggle:{code}')],[InlineKeyboardButton(text='✏️ Изменить текст', callback_data=f'admin:mailing:edit:{code}')],[InlineKeyboardButton(text='← Правила', callback_data='admin:mailing:rules')]])
 
 
 def node_manage_menu(node_key: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🔄 Проверить', callback_data=f'admin:node:check:{node_key}')],
-        [InlineKeyboardButton(text='♻️ Reboot node', callback_data=f'admin:node:reboot:{node_key}')],
-        [InlineKeyboardButton(text='⬆️ Update remnanode', callback_data=f'admin:node:update:{node_key}')],
-        [InlineKeyboardButton(text='🔗 Connect remnanode', callback_data=f'admin:node:connect:{node_key}')],
-        [InlineKeyboardButton(text='← Ноды', callback_data='admin:nodes')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔄 Проверить', callback_data=f'admin:node:check:{node_key}')],[InlineKeyboardButton(text='♻️ Reboot node', callback_data=f'admin:node:reboot:{node_key}')],[InlineKeyboardButton(text='⬆️ Update remnanode', callback_data=f'admin:node:update:{node_key}')],[InlineKeyboardButton(text='🔗 Connect remnanode', callback_data=f'admin:node:connect:{node_key}')],[InlineKeyboardButton(text='← Ноды', callback_data='admin:nodes')]])
 
 
 def admin_remna_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🖥 Серверы / Nodes', callback_data='admin:remna:nodes')],
-        [InlineKeyboardButton(text='🧩 Squads', callback_data='admin:remna:squads')],
-        [InlineKeyboardButton(text='👥 Пользователи Remna', callback_data='admin:remna:users')],
-        [InlineKeyboardButton(text='🔄 Синхронизация Remna → Bot', callback_data='admin:remna:sync')],
-        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🖥 Серверы / Nodes', callback_data='admin:remna:nodes')],[InlineKeyboardButton(text='🧩 Squads', callback_data='admin:remna:squads')],[InlineKeyboardButton(text='👥 Пользователи Remna', callback_data='admin:remna:users')],[InlineKeyboardButton(text='🔄 Синхронизация Remna → Bot', callback_data='admin:remna:sync')],[InlineKeyboardButton(text='← Админка', callback_data='admin:home')]])
 
 
 def admin_users_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🔎 Поиск', callback_data='admin:usersearch')],
-        [InlineKeyboardButton(text='🟢 Активные', callback_data='admin:users:active'), InlineKeyboardButton(text='🔴 Просроченные', callback_data='admin:users:expired')],
-        [InlineKeyboardButton(text='🕘 Последние', callback_data='admin:users:recent')],
-        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='🔎 Поиск', callback_data='admin:usersearch')],[InlineKeyboardButton(text='🟢 Активные', callback_data='admin:users:active'), InlineKeyboardButton(text='🔴 Просроченные', callback_data='admin:users:expired')],[InlineKeyboardButton(text='🕘 Последние', callback_data='admin:users:recent')],[InlineKeyboardButton(text='← Админка', callback_data='admin:home')]])
 
 
 def admin_user_menu(telegram_id: int, is_active: bool, free_access_active: bool = False, remna_uuid: str = '') -> InlineKeyboardMarkup:
-    action = '🚫 Заблокировать' if is_active else '✅ Активировать'
-    key = 'block' if is_active else 'activate'
-    free_button = (
-        InlineKeyboardButton(text='⛔ Отключить доступ другу', callback_data=f'admin:friend:revoke:{telegram_id}')
-        if free_access_active else
-        InlineKeyboardButton(text='🎁 Выдать другу', callback_data=f'admin:friend:plans:{telegram_id}')
-    )
-    rows = [
-        [free_button],
-        [InlineKeyboardButton(text=action, callback_data=f'admin:{key}:{telegram_id}')],
-    ]
-    if remna_uuid:
-        rows.append([InlineKeyboardButton(text='🧩 Сменить Squad', callback_data=f'admin:remna:change_squad:{remna_uuid}')])
+    action = '🚫 Заблокировать' if is_active else '✅ Активировать'; key = 'block' if is_active else 'activate'
+    free_button = InlineKeyboardButton(text='⛔ Отключить доступ другу', callback_data=f'admin:friend:revoke:{telegram_id}') if free_access_active else InlineKeyboardButton(text='🎁 Выдать другу', callback_data=f'admin:friend:plans:{telegram_id}')
+    rows = [[free_button],[InlineKeyboardButton(text=action, callback_data=f'admin:{key}:{telegram_id}')]]
+    if remna_uuid: rows.append([InlineKeyboardButton(text='🧩 Сменить Squad', callback_data=f'admin:remna:change_squad:{remna_uuid}')])
     rows.append([InlineKeyboardButton(text='← Пользователи', callback_data='admin:users')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -201,24 +145,12 @@ def admin_user_menu(telegram_id: int, is_active: bool, free_access_active: bool 
 def admin_plans_menu(plans: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for p in plans:
-        if p.get('slug') == 'remna-import':
-            continue
+        if p.get('slug') == 'remna-import': continue
         badge = '🛒' if int(p.get('is_public', 1)) else '🔒'
         rows.append([InlineKeyboardButton(text=f"{badge} {'🟢' if p['is_active'] else '⚪'} {p['title']} · {p['price_rub']} ₽", callback_data=f"admin:plan:{p['id']}")])
-    rows += [
-        [InlineKeyboardButton(text='➕ Новый публичный', callback_data='admin:planadd')],
-        [InlineKeyboardButton(text='🔒 Новый служебный', callback_data='admin:planadd_service')],
-        [InlineKeyboardButton(text='← Админка', callback_data='admin:home')],
-    ]
+    rows += [[InlineKeyboardButton(text='➕ Новый публичный', callback_data='admin:planadd')],[InlineKeyboardButton(text='🔒 Новый служебный', callback_data='admin:planadd_service')],[InlineKeyboardButton(text='← Админка', callback_data='admin:home')]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_plan_menu(plan_id: int, is_active: bool) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='✏️ Название', callback_data=f'admin:planedit:title:{plan_id}'), InlineKeyboardButton(text='💰 Цена', callback_data=f'admin:planedit:price_rub:{plan_id}')],
-        [InlineKeyboardButton(text='📅 Дни', callback_data=f'admin:planedit:duration_days:{plan_id}'), InlineKeyboardButton(text='📶 Трафик', callback_data=f'admin:planedit:traffic_gb:{plan_id}')],
-        [InlineKeyboardButton(text='📝 Описание', callback_data=f'admin:planedit:description:{plan_id}')],
-        [InlineKeyboardButton(text='⛔ Выключить' if is_active else '✅ Включить', callback_data=f'admin:plantoggle:{plan_id}')],
-        [InlineKeyboardButton(text='🗑 Удалить тариф', callback_data=f'admin:plandelete:ask:{plan_id}')],
-        [InlineKeyboardButton(text='← Тарифы', callback_data='admin:plans')],
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='✏️ Название', callback_data=f'admin:planedit:title:{plan_id}'), InlineKeyboardButton(text='💰 Цена', callback_data=f'admin:planedit:price_rub:{plan_id}')],[InlineKeyboardButton(text='📅 Дни', callback_data=f'admin:planedit:duration_days:{plan_id}'), InlineKeyboardButton(text='📶 Трафик', callback_data=f'admin:planedit:traffic_gb:{plan_id}')],[InlineKeyboardButton(text='📝 Описание', callback_data=f'admin:planedit:description:{plan_id}')],[InlineKeyboardButton(text='⛔ Выключить' if is_active else '✅ Включить', callback_data=f'admin:plantoggle:{plan_id}')],[InlineKeyboardButton(text='🗑 Удалить тариф', callback_data=f'admin:plandelete:ask:{plan_id}')],[InlineKeyboardButton(text='← Тарифы', callback_data='admin:plans')]])
