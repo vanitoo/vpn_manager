@@ -28,7 +28,6 @@ def _log_key(value: Any) -> str:
 
 
 def _redact_for_log(value: Any) -> Any:
-    """Return a recursively sanitized copy suitable for DEBUG logs."""
     if isinstance(value, dict):
         return {
             key: '***REDACTED***' if _log_key(key) in _SENSITIVE_LOG_KEYS else _redact_for_log(item)
@@ -185,6 +184,71 @@ class RemnawaveClient:
         user = self._unwrap(data)
         return user if isinstance(user, dict) else None
 
+    async def _list_users(self, *, limit: int = 3000) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        page = 0
+        size = min(max(limit, 1), 1000)
+        while len(result) < limit:
+            _, data = await self._request('GET', f'/api/users?page={page}&size={size}', expected_status=(200, 404))
+            payload = self._unwrap(data)
+            if isinstance(payload, dict):
+                rows = payload.get('users') or payload.get('data') or payload.get('items') or []
+            elif isinstance(payload, list):
+                rows = payload
+            else:
+                rows = []
+            rows = [row for row in rows if isinstance(row, dict)]
+            if not rows:
+                break
+            result.extend(rows)
+            if len(rows) < size:
+                break
+            page += 1
+        return result[:limit]
+
+    @staticmethod
+    def _user_telegram_id(user: dict[str, Any]) -> int | None:
+        raw = user.get('telegramId') or user.get('telegram_id')
+        try:
+            if raw not in (None, ''):
+                return int(raw)
+        except Exception:
+            pass
+        email = str(user.get('email') or '')
+        match = re.search(r'^tg(\d+)@bot\.local$', email, flags=re.I)
+        if match:
+            return int(match.group(1))
+        return None
+
+    async def _find_existing_user(self, *, telegram_id: int, username: str | None) -> dict[str, Any] | None:
+        email = self._email_for_user(telegram_id)
+        current = await self._get_user_by_email(email)
+        if current:
+            return current
+
+        safe_username = self._safe_username(username, telegram_id)
+        users = await self._list_users(limit=3000)
+
+        for user in users:
+            if self._user_telegram_id(user) == telegram_id:
+                log.info('Remnawave user relinked by telegramId: telegram_id=%s uuid=%s', telegram_id, user.get('uuid') or user.get('id'))
+                return user
+
+        username_matches = [
+            user for user in users
+            if str(user.get('username') or '').strip().lower() == safe_username.lower()
+        ]
+        if len(username_matches) == 1:
+            user = username_matches[0]
+            log.warning(
+                'Remnawave user relinked by unique username fallback: telegram_id=%s username=%s uuid=%s',
+                telegram_id, safe_username, user.get('uuid') or user.get('id'),
+            )
+            return user
+        if len(username_matches) > 1:
+            log.error('Multiple Remnawave users match username=%s; refusing automatic relink', safe_username)
+        return None
+
     def _subscription_url(self, user: dict[str, Any]) -> str:
         direct = user.get('subscriptionUrl') or user.get('subscription_url') or user.get('subUrl')
         if direct:
@@ -209,7 +273,7 @@ class RemnawaveClient:
             return self._fallback_access(telegram_id)
 
         email = self._email_for_user(telegram_id)
-        current = await self._get_user_by_email(email)
+        current = await self._find_existing_user(telegram_id=telegram_id, username=username)
         expire_at = datetime.now(timezone.utc) + timedelta(days=duration_days)
         if current and current.get('expireAt'):
             try:
@@ -223,9 +287,14 @@ class RemnawaveClient:
         configured_strategy = getattr(self.settings, 'remnawave_traffic_limit_strategy', 'MONTH').upper()
         if configured_strategy not in {'NO_RESET', 'DAY', 'WEEK', 'MONTH'}:
             raise RuntimeError(f'Unsupported REMNAWAVE_TRAFFIC_LIMIT_STRATEGY: {configured_strategy}')
-        payload: dict[str, Any] = {'status': 'ACTIVE', 'expireAt': self._to_iso(expire_at), 'activeInternalSquads': [squad_uuid], 'email': email, 'telegramId': int(telegram_id), 'description': f'Telegram VPN bot user {telegram_id}' }
-        # Preserve the per-user Remnawave strategy on extension. For a new user,
-        # explicitly apply the configured policy instead of the API's NO_RESET default.
+        payload: dict[str, Any] = {
+            'status': 'ACTIVE',
+            'expireAt': self._to_iso(expire_at),
+            'activeInternalSquads': [squad_uuid],
+            'email': email,
+            'telegramId': int(telegram_id),
+            'description': f'Telegram VPN bot user {telegram_id}',
+        }
         if not current:
             payload['trafficLimitStrategy'] = configured_strategy
         if traffic_limit_bytes is not None:
@@ -237,13 +306,29 @@ class RemnawaveClient:
 
         method = 'PATCH' if current else 'POST'
         if current:
-            payload['uuid'] = current.get('uuid')
+            payload['uuid'] = current.get('uuid') or current.get('id')
             if not payload['uuid']:
                 raise RuntimeError('Remnawave existing user has no uuid')
         else:
             payload['username'] = self._safe_username(username, telegram_id)
 
-        _, data = await self._request(method, '/api/users', json_payload=payload, expected_status=(200, 201))
+        try:
+            _, data = await self._request(method, '/api/users', json_payload=payload, expected_status=(200, 201))
+        except RuntimeError as exc:
+            if method == 'POST' and ('A019' in str(exc) or 'username already exists' in str(exc).lower()):
+                current = await self._find_existing_user(telegram_id=telegram_id, username=username)
+                if not current:
+                    raise
+                payload.pop('username', None)
+                payload.pop('trafficLimitStrategy', None)
+                payload['uuid'] = current.get('uuid') or current.get('id')
+                if not payload['uuid']:
+                    raise RuntimeError('Remnawave existing user has no uuid') from exc
+                log.warning('POST /api/users returned duplicate username; retrying as PATCH for telegram_id=%s uuid=%s', telegram_id, payload['uuid'])
+                _, data = await self._request('PATCH', '/api/users', json_payload=payload, expected_status=(200, 201))
+            else:
+                raise
+
         user = self._unwrap(data)
         if not isinstance(user, dict):
             raise RuntimeError(f'Remnawave returned unexpected user payload: {data}')
