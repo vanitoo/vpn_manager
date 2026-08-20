@@ -6,6 +6,8 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from app.version import APP_NAME, APP_VERSION, BUILD_DATE, DB_SCHEMA_VERSION
+
 
 def _fmt_bytes(value: int | float) -> str:
     n = float(value)
@@ -18,6 +20,10 @@ def _fmt_bytes(value: int | float) -> str:
 
 def get_system_info(db_path: str, log_file: str) -> str:
     lines = []
+    lines.append(f'App: {APP_NAME}')
+    lines.append(f'Version: {APP_VERSION}')
+    lines.append(f'Build date: {BUILD_DATE}')
+    lines.append(f'DB schema: {DB_SCHEMA_VERSION}')
     lines.append(f'OS: {platform.system()} {platform.release()}')
     lines.append(f'Python: {platform.python_version()}')
     lines.append(f'Host: {platform.node() or "unknown"}')
