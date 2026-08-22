@@ -12,7 +12,7 @@ from app.keyboards import main_menu, support_menu
 
 router = Router()
 
-HAPP_REDIRECT_BASE = 'https://legiz-ru.github.io/Orion/redirect-page/?redirect_to='
+HAPP_REDIRECT_BASE = 'https://ss.6679.ru/redirect?to='
 
 
 def esc(value: str) -> str:
