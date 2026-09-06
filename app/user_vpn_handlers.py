@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from urllib.parse import quote
-
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -11,8 +9,6 @@ from app.db import get_active_subscription, upsert_user
 from app.keyboards import main_menu, support_menu
 
 router = Router()
-
-HAPP_REDIRECT_BASE = 'https://ss.6679.ru/redirect?to='
 
 
 def esc(value: str) -> str:
@@ -31,28 +27,11 @@ def subscription_page_url(url: str) -> str:
     return f'{base}/{url.lstrip("/")}' if base else url
 
 
-def happ_url(url: str) -> str:
-    page = subscription_page_url(url)
-    if not page:
-        return ''
-    return f'happ://add/{page}'
-
-
-def happ_redirect_url(url: str) -> str:
-    direct = happ_url(url)
-    if not direct:
-        return ''
-    return HAPP_REDIRECT_BASE + quote(direct, safe='')
-
-
 def connect_menu(subscription_url: str) -> InlineKeyboardMarkup:
     page = subscription_page_url(subscription_url)
-    direct = happ_redirect_url(page)
     rows: list[list[InlineKeyboardButton]] = []
-    if direct:
-        rows.append([InlineKeyboardButton(text='⚡ Подключить в Happ', url=direct)])
     if page:
-        rows.append([InlineKeyboardButton(text='📖 Установка / другое устройство', url=page)])
+        rows.append([InlineKeyboardButton(text='⚡ Подключить VPN', url=page)])
     rows += [
         [InlineKeyboardButton(text='💳 Продлить', callback_data='plans')],
         [InlineKeyboardButton(text='❓ Помощь', callback_data='help')],
@@ -99,9 +78,7 @@ async def my_vpn(callback: CallbackQuery) -> None:
     text = (
         '🔑 <b>Ваш VPN готов</b>\n\n'
         f'🟢 Активен до <b>{expires}</b>\n\n'
-        '<b>Если Happ уже установлен:</b>\n'
-        'нажмите «⚡ Подключить в Happ» — подписка добавится в приложение.\n\n'
-        '<b>Если приложения ещё нет:</b>\n'
-        'откройте «📖 Установка / другое устройство».'
+        'Нажмите «⚡ Подключить VPN». На странице сразу будут кнопка открытия в Happ '
+        'и ссылки для скачивания приложения на нужное устройство.'
     )
     await callback.message.answer(text, reply_markup=connect_menu(page))
