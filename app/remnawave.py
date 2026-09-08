@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import aiohttp
 from aiohttp import BasicAuth
@@ -49,6 +49,8 @@ def _response_summary(data: Any) -> str:
         for key in ('users', 'nodes', 'internalSquads', 'squads', 'items', 'data'):
             if isinstance(payload.get(key), list):
                 parts.append(f'{key}={len(payload[key])}')
+        if payload.get('nextCursor') is not None:
+            parts.append('cursor=yes')
         return ' '.join(parts) or f'fields={len(payload)}'
     if isinstance(payload, list):
         return f'items={len(payload)}'
@@ -63,9 +65,16 @@ class RemnawaveAccess:
 
 
 class RemnawaveClient:
+    """Compatibility client for Remnawave Panel 2.8.x and 3.x.
+
+    API major is auto-detected and cached per client instance. Panel 2 uses user UUIDs;
+    Panel 3 uses numeric user IDs and cursor-based /api/users/stream filtering.
+    """
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self.last_error: str = ''
+        self._api_major_cache: int | None = None
 
     @property
     def is_configured(self) -> bool:
@@ -130,14 +139,78 @@ class RemnawaveClient:
     def _unwrap(data: dict[str, Any]) -> Any:
         return data.get('response') if isinstance(data, dict) and 'response' in data else data
 
+    @classmethod
+    def _rows_from_payload(cls, data: dict[str, Any]) -> list[dict[str, Any]]:
+        payload = cls._unwrap(data)
+        if isinstance(payload, list):
+            return [row for row in payload if isinstance(row, dict)]
+        if isinstance(payload, dict):
+            for key in ('users', 'data', 'items', 'records'):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return [row for row in value if isinstance(row, dict)]
+        return []
+
+    async def api_major(self) -> int:
+        if self._api_major_cache in (2, 3):
+            return self._api_major_cache
+
+        # Both versions support the users list. User objects are authoritative:
+        # v2 contains uuid, v3 removed user uuid and uses numeric id.
+        try:
+            _, data = await self._request('GET', '/api/users?start=0&size=1', expected_status=(200,))
+            rows = self._rows_from_payload(data)
+            if rows:
+                row = rows[0]
+                if row.get('uuid'):
+                    self._api_major_cache = 2
+                elif row.get('id') is not None:
+                    self._api_major_cache = 3
+        except Exception as exc:
+            log.warning('Remnawave API version detection via users failed: %s', exc)
+
+        # Empty panels cannot be distinguished by a user object. v3 accepts the
+        # telegramId filter on /users/stream; use it as a secondary probe.
+        if self._api_major_cache is None:
+            try:
+                status, _ = await self._request(
+                    'GET', '/api/users/stream?telegramId=0&size=1', expected_status=(200, 400, 404)
+                )
+                self._api_major_cache = 3 if status == 200 else 2
+            except Exception:
+                self._api_major_cache = 2
+
+        log.info('Detected Remnawave API major v%s', self._api_major_cache)
+        return self._api_major_cache
+
+    async def _identity_payload(self, user_ref: str | int) -> dict[str, Any]:
+        major = await self.api_major()
+        if major >= 3:
+            try:
+                return {'id': int(user_ref)}
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f'Remnawave v3 requires numeric user id, got {user_ref!r}') from exc
+        return {'uuid': str(user_ref)}
+
+    async def patch_user(self, user_ref: str | int, changes: dict[str, Any]) -> dict[str, Any]:
+        payload = {**await self._identity_payload(user_ref), **changes}
+        _, data = await self._request('PATCH', '/api/users', json_payload=payload, expected_status=(200, 201))
+        user = self._unwrap(data)
+        return user if isinstance(user, dict) else {}
+
     async def diagnostics(self) -> str:
         if not self.settings.remnawave_base_url:
             return 'REMNAWAVE_BASE_URL пустой'
         if not self.settings.remnawave_api_token:
             return 'REMNAWAVE_API_TOKEN пустой'
         checks = []
+        try:
+            major = await self.api_major()
+            checks.append(f'API: v{major} (auto)')
+        except Exception as exc:
+            checks.append(f'API: detection error: {exc}')
         checks.append(f"nginx_auth={'on' if self.settings.remnawave_nginx_auth_enabled else 'off'} cookie={self.settings.remnawave_nginx_cookie_name or '-'} basic={'on' if self._basic_auth() else 'off'}")
-        for path in ['/api/auth/session', '/api/internal-squads', '/api/users?page=0&size=1', '/api/nodes']:
+        for path in ['/api/auth/session', '/api/internal-squads', '/api/users?start=0&size=1', '/api/nodes']:
             try:
                 await self._request('GET', path, expected_status=(200, 404))
                 checks.append(f'✅ {path}')
@@ -177,7 +250,31 @@ class RemnawaveClient:
                 return str(value)
         return ''
 
+    async def _stream_users_v3(self, *, filters: dict[str, Any] | None = None, limit: int = 3000) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        cursor: Any = None
+        size = min(max(limit, 1), 1000)
+        while len(result) < limit:
+            params: dict[str, Any] = {'size': min(size, limit - len(result))}
+            if filters:
+                params.update({k: v for k, v in filters.items() if v not in (None, '')})
+            if cursor not in (None, ''):
+                params['cursor'] = cursor
+            _, data = await self._request('GET', '/api/users/stream?' + urlencode(params), expected_status=(200,))
+            rows = self._rows_from_payload(data)
+            result.extend(rows)
+            payload = self._unwrap(data)
+            next_cursor = payload.get('nextCursor') if isinstance(payload, dict) else None
+            if not rows or next_cursor in (None, '', cursor):
+                break
+            cursor = next_cursor
+        return result[:limit]
+
     async def _get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        if await self.api_major() >= 3:
+            rows = await self._stream_users_v3(filters={'email': email}, limit=2)
+            exact = [row for row in rows if str(row.get('email') or '').lower() == email.lower()]
+            return exact[0] if exact else (rows[0] if len(rows) == 1 else None)
         status, data = await self._request('GET', f'/api/users/by-email/{quote(email)}', expected_status=(200, 404))
         if status == 404:
             return None
@@ -185,6 +282,10 @@ class RemnawaveClient:
         return user if isinstance(user, dict) else None
 
     async def _get_user_by_telegram_id(self, telegram_id: int) -> dict[str, Any] | None:
+        if await self.api_major() >= 3:
+            rows = await self._stream_users_v3(filters={'telegramId': int(telegram_id)}, limit=2)
+            exact = [row for row in rows if self._user_telegram_id(row) == int(telegram_id)]
+            return exact[0] if exact else (rows[0] if len(rows) == 1 else None)
         status, data = await self._request('GET', f'/api/users/by-telegram-id/{telegram_id}', expected_status=(200, 404))
         if status == 404:
             return None
@@ -199,19 +300,15 @@ class RemnawaveClient:
         return user if isinstance(user, dict) else None
 
     async def _list_users(self, *, limit: int = 3000) -> list[dict[str, Any]]:
+        if await self.api_major() >= 3:
+            return await self._stream_users_v3(limit=limit)
+
         result: list[dict[str, Any]] = []
         page = 0
         size = min(max(limit, 1), 1000)
         while len(result) < limit:
             _, data = await self._request('GET', f'/api/users?page={page}&size={size}', expected_status=(200, 404))
-            payload = self._unwrap(data)
-            if isinstance(payload, dict):
-                rows = payload.get('users') or payload.get('data') or payload.get('items') or []
-            elif isinstance(payload, list):
-                rows = payload
-            else:
-                rows = []
-            rows = [row for row in rows if isinstance(row, dict)]
+            rows = self._rows_from_payload(data)
             if not rows:
                 break
             result.extend(rows)
@@ -238,24 +335,24 @@ class RemnawaveClient:
         email = self._email_for_user(telegram_id)
         current = await self._get_user_by_email(email)
         if current:
-            log.info('Remnawave user found by bot email: telegram_id=%s uuid=%s', telegram_id, current.get('uuid') or current.get('id'))
+            log.info('Remnawave user found by bot email: telegram_id=%s id=%s', telegram_id, current.get('id') or current.get('uuid'))
             return current
 
         current = await self._get_user_by_telegram_id(telegram_id)
         if current:
-            log.info('Remnawave user found by telegramId endpoint: telegram_id=%s uuid=%s', telegram_id, current.get('uuid') or current.get('id'))
+            log.info('Remnawave user found by telegramId: telegram_id=%s id=%s', telegram_id, current.get('id') or current.get('uuid'))
             return current
 
         safe_username = self._safe_username(username, telegram_id)
         current = await self._get_user_by_username(safe_username)
         if current:
-            log.warning('Remnawave user found by username endpoint: telegram_id=%s username=%s uuid=%s', telegram_id, safe_username, current.get('uuid') or current.get('id'))
+            log.warning('Remnawave user found by username: telegram_id=%s username=%s id=%s', telegram_id, safe_username, current.get('id') or current.get('uuid'))
             return current
 
         users = await self._list_users(limit=3000)
         for user in users:
             if self._user_telegram_id(user) == telegram_id:
-                log.info('Remnawave user relinked by list telegramId: telegram_id=%s uuid=%s', telegram_id, user.get('uuid') or user.get('id'))
+                log.info('Remnawave user relinked by list telegramId: telegram_id=%s id=%s', telegram_id, user.get('id') or user.get('uuid'))
                 return user
 
         username_matches = [
@@ -264,22 +361,24 @@ class RemnawaveClient:
         ]
         if len(username_matches) == 1:
             user = username_matches[0]
-            log.warning('Remnawave user relinked by unique username fallback: telegram_id=%s username=%s uuid=%s', telegram_id, safe_username, user.get('uuid') or user.get('id'))
+            log.warning('Remnawave user relinked by unique username fallback: telegram_id=%s username=%s id=%s', telegram_id, safe_username, user.get('id') or user.get('uuid'))
             return user
         if len(username_matches) > 1:
             log.error('Multiple Remnawave users match username=%s; refusing automatic relink', safe_username)
         return None
 
-    def _subscription_url(self, user: dict[str, Any]) -> str:
+    async def _subscription_url(self, user: dict[str, Any]) -> str:
         direct = user.get('subscriptionUrl') or user.get('subscription_url') or user.get('subUrl')
         if direct:
             return str(direct)
         short_uuid = user.get('shortUuid') or user.get('short_uuid')
         if short_uuid and self.settings.remnawave_subscription_base_url:
             return f"{self.settings.remnawave_subscription_base_url}/{short_uuid}"
-        user_uuid = user.get('uuid') or user.get('id')
-        if user_uuid and self.settings.remnawave_subscription_base_url:
-            return f"{self.settings.remnawave_subscription_base_url}/{user_uuid}"
+        # Numeric v3 user IDs are not valid public subscription paths.
+        if await self.api_major() < 3:
+            user_uuid = user.get('uuid')
+            if user_uuid and self.settings.remnawave_subscription_base_url:
+                return f"{self.settings.remnawave_subscription_base_url}/{user_uuid}"
         return ''
 
     async def create_or_extend_user(self, *, telegram_id: int, username: str | None, duration_days: int, traffic_gb: int) -> RemnawaveAccess:
@@ -287,6 +386,8 @@ class RemnawaveClient:
             self.last_error = 'Remnawave base URL or token is not configured'
             log.warning(self.last_error)
             return self._fallback_access(telegram_id)
+
+        major = await self.api_major()
         squad_uuid = await self.resolve_internal_squad_uuid()
         if not squad_uuid:
             self.last_error = 'Internal squad UUID not found. Fill REMNAWAVE_INTERNAL_SQUAD_UUID or check API access.'
@@ -308,6 +409,7 @@ class RemnawaveClient:
         configured_strategy = getattr(self.settings, 'remnawave_traffic_limit_strategy', 'MONTH').upper()
         if configured_strategy not in {'NO_RESET', 'DAY', 'WEEK', 'MONTH'}:
             raise RuntimeError(f'Unsupported REMNAWAVE_TRAFFIC_LIMIT_STRATEGY: {configured_strategy}')
+
         payload: dict[str, Any] = {
             'status': 'ACTIVE',
             'expireAt': self._to_iso(expire_at),
@@ -327,9 +429,10 @@ class RemnawaveClient:
 
         method = 'PATCH' if current else 'POST'
         if current:
-            payload['uuid'] = current.get('uuid') or current.get('id')
-            if not payload['uuid']:
-                raise RuntimeError('Remnawave existing user has no uuid')
+            ref = current.get('id') if major >= 3 else current.get('uuid')
+            if ref in (None, ''):
+                raise RuntimeError(f'Remnawave v{major} existing user has no valid identifier')
+            payload.update(await self._identity_payload(ref))
         else:
             payload['username'] = self._safe_username(username, telegram_id)
 
@@ -347,10 +450,13 @@ class RemnawaveClient:
                     ) from exc
                 payload.pop('username', None)
                 payload.pop('trafficLimitStrategy', None)
-                payload['uuid'] = current.get('uuid') or current.get('id')
-                if not payload['uuid']:
-                    raise RuntimeError('Remnawave existing user has no uuid') from exc
-                log.warning('POST /api/users returned duplicate username; resolved existing user and retrying PATCH: telegram_id=%s username=%s uuid=%s', telegram_id, safe_username, payload['uuid'])
+                payload.pop('uuid', None)
+                payload.pop('id', None)
+                ref = current.get('id') if major >= 3 else current.get('uuid')
+                if ref in (None, ''):
+                    raise RuntimeError(f'Remnawave v{major} existing user has no valid identifier') from exc
+                payload.update(await self._identity_payload(ref))
+                log.warning('POST /api/users duplicate username; retrying PATCH for telegram_id=%s username=%s id=%s', telegram_id, safe_username, ref)
                 _, data = await self._request('PATCH', '/api/users', json_payload=payload, expected_status=(200, 201))
             else:
                 raise
@@ -358,7 +464,7 @@ class RemnawaveClient:
         user = self._unwrap(data)
         if not isinstance(user, dict):
             raise RuntimeError(f'Remnawave returned unexpected user payload: {data}')
-        remnawave_user_id = str(user.get('uuid') or user.get('id') or '')
-        subscription_url = self._subscription_url(user)
-        log.info('Remnawave user ready: telegram_id=%s uuid=%s subscription_url_set=%s', telegram_id, remnawave_user_id, bool(subscription_url))
+        remnawave_user_id = str(user.get('id') if major >= 3 else user.get('uuid') or user.get('id') or '')
+        subscription_url = await self._subscription_url(user)
+        log.info('Remnawave user ready: telegram_id=%s api=v%s id=%s subscription_url_set=%s', telegram_id, major, remnawave_user_id, bool(subscription_url))
         return RemnawaveAccess(remnawave_user_id=remnawave_user_id, subscription_url=subscription_url, raw=user)
