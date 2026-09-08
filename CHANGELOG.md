@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-09-08
+
+### Added
+
+- Автоопределение основной версии Remnawave API: `2.x` или `3.x`.
+- Поддержка Remnawave 3.x с числовыми `id` пользователей и фильтрацией через `/api/users/stream`.
+- Автоматический relink локальных записей с UUID Remnawave 2.x на числовые ID Remnawave 3.x при синхронизации.
+
+### Changed
+
+- Создание, продление, блокировка, активация, смена squad и назначение служебного тарифа используют единый version-aware Remnawave client.
+- Список пользователей Remnawave использует cursor pagination в API 3.x и старую pagination-схему в API 2.x.
+- `node_scripts/create-node.py` принимает `pubKey` от Remnawave 2.x и `secretKey` от Remnawave 3.x.
+- В административном интерфейсе идентификатор пользователя называется `Remnawave ID`, поскольку в 3.x user UUID удалён.
+
 ## [0.8.3] - 2026-09-06
 
 ### Changed
