@@ -56,7 +56,7 @@ def remna_tg(row: dict[str, Any]) -> int | None:
 
 
 def remna_uuid(row: dict[str, Any]) -> str:
-    return str(row.get('uuid') or row.get('id') or '')
+    return str(row.get('id') or row.get('uuid') or '')
 
 
 def remna_expire(row: dict[str, Any]) -> str:
@@ -273,7 +273,7 @@ async def users_search_start(callback: CallbackQuery, state: FSMContext) -> None
         return
     await state.set_state(UserSearchForm.query)
     await callback.answer()
-    await callback.message.answer('🔎 Пришлите Telegram ID, @username, email, Remnawave UUID или часть имени.\n\n/cancel — отменить.')
+    await callback.message.answer('🔎 Пришлите Telegram ID, @username, email, Remnawave ID или часть имени.\n\n/cancel — отменить.')
 
 
 @router.message(UserSearchForm.query)
@@ -331,7 +331,7 @@ async def user_card(callback: CallbackQuery) -> None:
         f"Тариф: {esc(local.get('plan_title') or '-')}\n"
         f"Оплат: {esc(local.get('paid_count') or 0)} · {esc(local.get('paid_total') or 0)} ₽\n\n"
         '<b>Remnawave</b>\n'
-        f"UUID: <code>{esc(remna_uuid(remote) or local.get('remnawave_user_id') or '-')}</code>\n"
+        f"ID: <code>{esc(remna_uuid(remote) or local.get('remnawave_user_id') or '-')}</code>\n"
         f"Status: {esc(remote.get('status') or '-')}\n"
         f"Squad: {esc(squads_text(remote))}\n"
         f"Трафик: {fmt_bytes(traffic_used(remote))} / {fmt_bytes(traffic_limit(remote))}\n"
@@ -475,11 +475,7 @@ async def friend_access_revoke(callback: CallbackQuery) -> None:
     )
     if remna_uuid_value and not has_other_access:
         try:
-            await RemnawaveClient(runtime.settings)._request(
-                'PATCH', '/api/users',
-                json_payload={'uuid': remna_uuid_value, 'status': 'DISABLED'},
-                expected_status=(200, 201),
-            )
+            await RemnawaveClient(runtime.settings).patch_user(remna_uuid_value, {'status': 'DISABLED'})
         except Exception as exc:
             await callback.answer('Локально отключено, ошибка Remnawave', show_alert=True)
             await callback.message.answer(f'⚠️ Локальная выдача закрыта, но Remnawave не ответила:\n<code>{esc(type(exc).__name__ + ": " + str(exc))[:1200]}</code>')
