@@ -102,20 +102,7 @@ async def remna_squads(client: RemnawaveClient) -> list[dict[str, Any]]:
 
 
 async def remna_users(client: RemnawaveClient, *, limit: int = 500) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    page = 0
-    size = min(max(limit, 1), 1000)
-    while len(result) < limit:
-        path = f'/api/users?page={page}&size={size}'
-        _, data = await client._request('GET', path, expected_status=(200, 404))
-        rows = _extract_list(data, ['users', 'data', 'items'])
-        if not rows:
-            break
-        result.extend(rows)
-        if len(rows) < size:
-            break
-        page += 1
-    return result[:limit]
+    return await client._list_users(limit=limit)
 
 
 def remna_stats(users: list[dict[str, Any]]) -> dict[str, Any]:
@@ -175,10 +162,12 @@ async def mark_plan_admin_only(db_path: str, plan_id: int, admin_only: bool) -> 
 
 
 async def sync_remna_users_to_sqlite(db_path: str, users: list[dict[str, Any]]) -> dict[str, int]:
+    """Sync Remnawave users and relink stored v2 UUIDs to v3 numeric IDs by Telegram ID."""
     await ensure_admin_plan_columns(db_path)
     imported = 0
     skipped = 0
     updated = 0
+    relinked = 0
     ts = now_iso()
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
@@ -209,17 +198,38 @@ async def sync_remna_users_to_sqlite(db_path: str, users: list[dict[str, Any]]) 
                 continue
             status = str(row.get('status') or 'ACTIVE').lower()
             sub_url = _subscription_url(row)
-            rw_uuid = str(row.get('uuid') or row.get('id') or '')
-            cur = await db.execute('SELECT id FROM subscriptions WHERE telegram_id=? AND remnawave_user_id=? ORDER BY id DESC LIMIT 1', (tg, rw_uuid))
+            rw_id = str(row.get('id') or row.get('uuid') or '')
+            if not rw_id:
+                skipped += 1
+                continue
+
+            cur = await db.execute(
+                'SELECT id, remnawave_user_id FROM subscriptions WHERE telegram_id=? AND remnawave_user_id=? ORDER BY id DESC LIMIT 1',
+                (tg, rw_id),
+            )
             existing = await cur.fetchone()
+            if not existing:
+                # Major upgrade v2 -> v3 changes user UUID to numeric ID. Telegram ID is
+                # stable, so relink the latest existing subscription instead of creating a duplicate.
+                cur = await db.execute(
+                    'SELECT id, remnawave_user_id FROM subscriptions WHERE telegram_id=? ORDER BY id DESC LIMIT 1',
+                    (tg,),
+                )
+                existing = await cur.fetchone()
+                if existing and str(existing['remnawave_user_id'] or '') != rw_id:
+                    relinked += 1
+
             if existing:
-                await db.execute('UPDATE subscriptions SET status=?, expires_at=?, subscription_url=?, updated_at=? WHERE id=?', ('active' if status == 'active' else status, expire, sub_url, ts, int(existing['id'])))
+                await db.execute(
+                    'UPDATE subscriptions SET status=?, expires_at=?, remnawave_user_id=?, subscription_url=?, updated_at=? WHERE id=?',
+                    ('active' if status == 'active' else status, expire, rw_id, sub_url, ts, int(existing['id'])),
+                )
                 updated += 1
             else:
                 await db.execute('''
                     INSERT INTO subscriptions (user_id, telegram_id, plan_id, status, starts_at, expires_at, remnawave_user_id, subscription_url, traffic_limit_gb, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-                ''', (user_id, tg, plan_id, 'active' if status == 'active' else status, ts, expire, rw_uuid, sub_url, ts, ts))
+                ''', (user_id, tg, plan_id, 'active' if status == 'active' else status, ts, expire, rw_id, sub_url, ts, ts))
                 imported += 1
         await db.commit()
-    return {'imported': imported, 'updated': updated, 'skipped': skipped, 'total': len(users)}
+    return {'imported': imported, 'updated': updated, 'relinked': relinked, 'skipped': skipped, 'total': len(users)}
