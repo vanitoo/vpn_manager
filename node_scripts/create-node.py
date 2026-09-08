@@ -207,10 +207,19 @@ def main() -> int:
         raise RuntimeError(f"Node was created but API returned an unexpected response: {node!r}")
 
     key_payload = api.request("GET", "/api/keygen")
-    secret_key = key_payload.get("pubKey", "") if isinstance(key_payload, dict) else ""
+    secret_key = ""
+    key_field = ""
+    if isinstance(key_payload, dict):
+        # Remnawave 2.x: pubKey; Remnawave 3.x: secretKey.
+        if key_payload.get("secretKey"):
+            secret_key = str(key_payload["secretKey"])
+            key_field = "secretKey (v3)"
+        elif key_payload.get("pubKey"):
+            secret_key = str(key_payload["pubKey"])
+            key_field = "pubKey (v2)"
     if not secret_key:
         raise RuntimeError(
-            f"Node {node['uuid']} was created, but /api/keygen returned no pubKey. "
+            f"Node {node['uuid']} was created, but /api/keygen returned neither secretKey nor pubKey. "
             "Delete the incomplete node manually if necessary."
         )
 
@@ -228,6 +237,7 @@ def main() -> int:
 
     print("\nNode created successfully.")
     print(f"  UUID:    {node['uuid']}")
+    print(f"  Key API: {key_field}")
     print(f"  Compose: {compose_path.resolve()}")
     print(f"  Metadata:{metadata_path.resolve()}")
     print("\nUse deploy-node.ps1 with the generated docker-compose.yml to install it.")
@@ -240,4 +250,3 @@ if __name__ == "__main__":
     except (RuntimeError, OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
-
