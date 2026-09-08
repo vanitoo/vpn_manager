@@ -28,12 +28,12 @@ def short_key(value1: str, value2: str) -> str:
     return key
 
 
-def user_uuid(item: dict) -> str:
-    return str(item.get('uuid') or item.get('id') or '')
+def user_ref(item: dict) -> str:
+    return str(item.get('id') or item.get('uuid') or '')
 
 
 def user_title(item: dict) -> str:
-    return str(item.get('email') or item.get('username') or user_uuid(item)[:8] or 'user')
+    return str(item.get('email') or item.get('username') or user_ref(item)[:8] or 'user')
 
 
 def parse_expire(value: str | None) -> datetime:
@@ -73,7 +73,7 @@ def node_line(item: dict) -> str:
 def remna_user_list_menu(users: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for item in users[:20]:
-        uid = user_uuid(item)
+        uid = user_ref(item)
         if not uid:
             continue
         title = user_title(item)
@@ -115,16 +115,16 @@ def plan_select_menu(uid: str, plans: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def get_remna_user_by_uuid(uid: str) -> dict | None:
+async def get_remna_user(uid: str) -> dict | None:
     rows = await remna_users(RemnawaveClient(runtime.settings), limit=1000)
     for item in rows:
-        if user_uuid(item) == uid:
+        if user_ref(item) == uid:
             return item
     return None
 
 
 async def patch_user_status(uid: str, status: str) -> None:
-    await RemnawaveClient(runtime.settings)._request('PATCH', '/api/users', json_payload={'uuid': uid, 'status': status}, expected_status=(200, 201))
+    await RemnawaveClient(runtime.settings).patch_user(uid, {'status': status})
 
 
 @router.callback_query(F.data == 'servers')
@@ -194,12 +194,12 @@ async def admin_user_card(callback: CallbackQuery) -> None:
         return
     uid = callback.data.split(':', 3)[3]
     await callback.answer('Карточка')
-    item = await get_remna_user_by_uuid(uid)
+    item = await get_remna_user(uid)
     if not item:
         await callback.message.answer('Пользователь не найден в Remnawave.', reply_markup=admin_remna_menu())
         return
     text = (f"👤 <b>{esc(user_title(item))}</b>\n\n"
-            f"UUID: <code>{esc(user_uuid(item))}</code>\n"
+            f"Remnawave ID: <code>{esc(user_ref(item))}</code>\n"
             f"Telegram ID: <code>{esc(str(item.get('telegramId') or item.get('telegram_id') or '-'))}</code>\n"
             f"Статус: <b>{esc(str(item.get('status') or '-'))}</b>\n"
             f"До: <b>{esc(str(item.get('expireAt') or item.get('expiresAt') or '-'))[:19]}</b>\n"
@@ -260,7 +260,7 @@ async def admin_set_squad(callback: CallbackQuery) -> None:
         return
     await callback.answer('Меняю squad')
     try:
-        await RemnawaveClient(runtime.settings)._request('PATCH', '/api/users', json_payload={'uuid': uid, 'activeInternalSquads': [squad_id], 'status': 'ACTIVE'}, expected_status=(200, 201))
+        await RemnawaveClient(runtime.settings).patch_user(uid, {'activeInternalSquads': [squad_id], 'status': 'ACTIVE'})
         await callback.message.answer(f'✅ Squad изменён.\n<code>{esc(squad_id)}</code>', reply_markup=remna_user_menu(uid))
     except Exception as exc:
         await callback.message.answer(f'Ошибка смены squad: <code>{esc(str(exc))[:1000]}</code>')
@@ -293,19 +293,19 @@ async def admin_set_plan(callback: CallbackQuery) -> None:
         return
     plans = await list_admin_plans(runtime.settings.db_path)
     plan = next((p for p in plans if str(p['id']) == plan_id_raw), None)
-    user = await get_remna_user_by_uuid(uid)
+    user = await get_remna_user(uid)
     if not plan or not user:
         await callback.message.answer('План или пользователь не найден.')
         return
     current_expire = parse_expire(str(user.get('expireAt') or user.get('expiresAt') or ''))
     start = current_expire if current_expire > datetime.now(timezone.utc) else datetime.now(timezone.utc)
     expire = start + timedelta(days=int(plan['duration_days']))
-    payload = {'uuid': uid, 'status': 'ACTIVE', 'expireAt': to_iso(expire)}
+    changes = {'status': 'ACTIVE', 'expireAt': to_iso(expire)}
     if int(plan.get('traffic_gb') or 0) > 0:
-        payload['trafficLimitBytes'] = int(plan['traffic_gb']) * 1024 * 1024 * 1024
+        changes['trafficLimitBytes'] = int(plan['traffic_gb']) * 1024 * 1024 * 1024
     await callback.answer('Назначаю тариф')
     try:
-        await RemnawaveClient(runtime.settings)._request('PATCH', '/api/users', json_payload=payload, expected_status=(200, 201))
+        await RemnawaveClient(runtime.settings).patch_user(uid, changes)
         await callback.message.answer(f"✅ Назначен служебный тариф <b>{esc(plan['title'])}</b>\nДо: <b>{to_iso(expire)[:19]}</b>", reply_markup=remna_user_menu(uid))
     except Exception as exc:
         await callback.message.answer(f'Ошибка назначения тарифа: <code>{esc(str(exc))[:1000]}</code>')
