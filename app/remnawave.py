@@ -155,26 +155,40 @@ class RemnawaveClient:
         if self._api_major_cache in (2, 3):
             return self._api_major_cache
 
-        # Both versions support the users list. User objects are authoritative:
-        # v2 contains uuid, v3 removed user uuid and uses numeric id.
+        # /api/keygen is the strongest non-mutating discriminator:
+        # Remnawave 2.x returns pubKey, while 3.x returns secretKey.
         try:
-            _, data = await self._request('GET', '/api/users?start=0&size=1', expected_status=(200,))
-            rows = self._rows_from_payload(data)
-            if rows:
-                row = rows[0]
-                if row.get('uuid'):
-                    self._api_major_cache = 2
-                elif row.get('id') is not None:
+            _, data = await self._request('GET', '/api/keygen', expected_status=(200,))
+            payload = self._unwrap(data)
+            if isinstance(payload, dict):
+                if payload.get('secretKey'):
                     self._api_major_cache = 3
+                elif payload.get('pubKey'):
+                    self._api_major_cache = 2
         except Exception as exc:
-            log.warning('Remnawave API version detection via users failed: %s', exc)
+            log.warning('Remnawave API version detection via keygen failed: %s', exc)
 
-        # Empty panels cannot be distinguished by a user object. v3 accepts the
-        # telegramId filter on /users/stream; use it as a secondary probe.
+        # If keygen is unavailable for this token, inspect a returned user object.
+        # v2 contains uuid; v3 removed user uuid and uses numeric id.
+        if self._api_major_cache is None:
+            try:
+                _, data = await self._request('GET', '/api/users?start=0&size=1', expected_status=(200,))
+                rows = self._rows_from_payload(data)
+                if rows:
+                    row = rows[0]
+                    if row.get('uuid'):
+                        self._api_major_cache = 2
+                    elif row.get('id') is not None:
+                        self._api_major_cache = 3
+            except Exception as exc:
+                log.warning('Remnawave API version detection via users failed: %s', exc)
+
+        # Final non-mutating probe for empty panels / restricted responses.
+        # Do not send a synthetic telegramId filter: v3 may reject it with 400.
         if self._api_major_cache is None:
             try:
                 status, _ = await self._request(
-                    'GET', '/api/users/stream?telegramId=0&size=1', expected_status=(200, 400, 404)
+                    'GET', '/api/users/stream?size=1', expected_status=(200, 400, 404)
                 )
                 self._api_major_cache = 3 if status == 200 else 2
             except Exception:
