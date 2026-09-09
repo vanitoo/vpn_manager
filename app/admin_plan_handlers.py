@@ -30,6 +30,103 @@ def plan_card_text(plan: dict) -> str:
     )
 
 
+async def show_plan_card(message: Message, plan_id: int) -> None:
+    plan = await get_plan_by_id(runtime.settings.db_path, plan_id)
+    if not plan:
+        await message.answer('Тариф не найден.')
+        return
+    await message.answer(
+        plan_card_text(plan),
+        reply_markup=admin_plan_menu(plan_id, bool(plan['is_active'])),
+    )
+
+
+@router.callback_query(F.data.regexp(r'^admin:plan:\d+$'))
+async def show_plan(callback: CallbackQuery) -> None:
+    if not runtime.admin(callback):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    plan_id = int(callback.data.rsplit(':', 1)[1])
+    await callback.answer()
+    await show_plan_card(callback.message, plan_id)
+
+
+class EditPlanForm(StatesGroup):
+    value = State()
+
+
+EDIT_FIELDS = {
+    'title': ('название', '✏️ Введите новое название тарифа:'),
+    'price_rub': ('цену', '💰 Введите новую цену в рублях:'),
+    'duration_days': ('срок', '📅 Введите новый срок тарифа в днях:'),
+    'traffic_gb': ('трафик', '📶 Введите новый лимит трафика в ГБ:\n\n0 = безлимит.'),
+    'description': ('описание', '📝 Введите новое описание тарифа:'),
+}
+
+
+@router.callback_query(F.data.startswith('admin:planedit:'))
+async def start_plan_edit(callback: CallbackQuery, state: FSMContext) -> None:
+    if not runtime.admin(callback):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    parts = callback.data.split(':')
+    if len(parts) != 4 or parts[2] not in EDIT_FIELDS:
+        await callback.answer('Неизвестное поле тарифа', show_alert=True)
+        return
+    try:
+        plan_id = int(parts[3])
+    except ValueError:
+        await callback.answer('Некорректный ID тарифа', show_alert=True)
+        return
+    plan = await get_plan_by_id(runtime.settings.db_path, plan_id)
+    if not plan:
+        await callback.answer('Тариф не найден', show_alert=True)
+        return
+    field = parts[2]
+    await state.set_state(EditPlanForm.value)
+    await state.update_data(plan_edit_field=field, plan_edit_id=plan_id)
+    await callback.answer()
+    await callback.message.answer(EDIT_FIELDS[field][1])
+
+
+@router.message(EditPlanForm.value)
+async def save_plan_edit(message: Message, state: FSMContext) -> None:
+    if not runtime.admin(message):
+        return
+    data = await state.get_data()
+    field = data.get('plan_edit_field')
+    plan_id = data.get('plan_edit_id')
+    if field not in EDIT_FIELDS or not plan_id:
+        await state.clear()
+        await message.answer('Не удалось определить редактируемый тариф.')
+        return
+
+    raw = (message.text or '').strip()
+    if field in {'price_rub', 'duration_days', 'traffic_gb'}:
+        try:
+            value = int(raw)
+        except ValueError:
+            await message.answer('Введите целое число.')
+            return
+        if field == 'duration_days' and value <= 0:
+            await message.answer('Срок должен быть больше 0 дней.')
+            return
+        if field in {'price_rub', 'traffic_gb'} and value < 0:
+            await message.answer('Значение не может быть отрицательным.')
+            return
+    else:
+        value = raw
+        if field == 'title' and not value:
+            await message.answer('Название не может быть пустым.')
+            return
+
+    await update_plan(runtime.settings.db_path, int(plan_id), field, value)
+    await state.clear()
+    label = EDIT_FIELDS[field][0]
+    await message.answer(f'✅ Изменено: <b>{label}</b>.')
+    await show_plan_card(message, int(plan_id))
+
+
 @router.callback_query(F.data.startswith('admin:plantoggle:'))
 async def toggle_plan(callback: CallbackQuery) -> None:
     if not runtime.admin(callback):
