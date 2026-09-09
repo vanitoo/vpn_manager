@@ -10,8 +10,12 @@ async def _ensure_balance_column(db_path: str) -> None:
         async with db.execute('PRAGMA table_info(users)') as cursor:
             columns = {str(row[1]) for row in await cursor.fetchall()}
         if 'balance_rub' not in columns:
-            await db.execute('ALTER TABLE users ADD COLUMN balance_rub INTEGER NOT NULL DEFAULT 0')
-            await db.commit()
+            try:
+                await db.execute('ALTER TABLE users ADD COLUMN balance_rub INTEGER NOT NULL DEFAULT 0')
+                await db.commit()
+            except aiosqlite.OperationalError as exc:
+                if 'duplicate column name' not in str(exc).lower():
+                    raise
 
 
 async def get_user_account(db_path: str, *, telegram_id: int) -> dict[str, Any] | None:
