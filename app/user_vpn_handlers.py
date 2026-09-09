@@ -75,9 +75,11 @@ async def my_vpn(callback: CallbackQuery) -> None:
 
     page = subscription_page_url(sub.get('subscription_url') or '')
     expires = esc(str(sub['expires_at'])[:10])
+    key_block = f'\n\n🔗 <b>Ваш ключ</b>\n<code>{esc(page)}</code>' if page else ''
     text = (
         '🔑 <b>Ваш VPN готов</b>\n\n'
-        f'🟢 Активен до <b>{expires}</b>\n\n'
+        f'🟢 Активен до <b>{expires}</b>'
+        f'{key_block}\n\n'
         'Нажмите «⚡ Подключить VPN». На странице сразу будут кнопка открытия в Happ '
         'и ссылки для скачивания приложения на нужное устройство.'
     )
