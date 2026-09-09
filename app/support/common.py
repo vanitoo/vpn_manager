@@ -21,6 +21,7 @@ CATEGORIES = {
 
 def help_menu(has_ticket: bool = False) -> InlineKeyboardMarkup:
     rows = [
+        [InlineKeyboardButton(text='📲 Как подключить VPN', callback_data='setup')],
         [InlineKeyboardButton(text='📖 FAQ', callback_data='faq')],
         [InlineKeyboardButton(text='🩺 Диагностика', callback_data='support:diag')],
         [InlineKeyboardButton(text='💬 Написать специалисту', callback_data='support:new')],
@@ -28,6 +29,30 @@ def help_menu(has_ticket: bool = False) -> InlineKeyboardMarkup:
     if has_ticket:
         rows.insert(0, [InlineKeyboardButton(text='🎫 Продолжить обращение', callback_data='support:continue')])
     rows.append([InlineKeyboardButton(text='⌂ Главное', callback_data='home')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def setup_devices_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='🍎 iPhone / iPad', callback_data='setup:ios'), InlineKeyboardButton(text='🤖 Android', callback_data='setup:android')],
+        [InlineKeyboardButton(text='🪟 Windows', callback_data='setup:windows'), InlineKeyboardButton(text='🍎 macOS', callback_data='setup:macos')],
+        [InlineKeyboardButton(text='🐧 Linux', callback_data='setup:linux')],
+        [InlineKeyboardButton(text='📺 Android TV', callback_data='setup:androidtv'), InlineKeyboardButton(text='📺 Apple TV', callback_data='setup:appletv')],
+        [InlineKeyboardButton(text='← Помощь', callback_data='help')],
+    ])
+
+
+def setup_device_menu(*, download_url: str = '', subscription_url: str = '') -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if download_url:
+        rows.append([InlineKeyboardButton(text='📥 Скачать приложение', url=download_url)])
+    if subscription_url:
+        rows.append([InlineKeyboardButton(text='⚡ Подключить VPN', url=subscription_url)])
+    rows += [
+        [InlineKeyboardButton(text='💬 Не получилось — поддержка', callback_data='support:new')],
+        [InlineKeyboardButton(text='← Другие устройства', callback_data='setup')],
+        [InlineKeyboardButton(text='⌂ Главное', callback_data='home')],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
