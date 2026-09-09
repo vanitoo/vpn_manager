@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 APP_NAME = 'Warp Private Network'
-APP_VERSION = '0.8.4'
-BUILD_DATE = '2026-09-08'
+APP_VERSION = '0.8.5'
+BUILD_DATE = '2026-09-09'
 
 # Version of the SQLite database structure expected by this application.
 DB_SCHEMA_VERSION = 1
