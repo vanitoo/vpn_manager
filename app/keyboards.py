@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 def main_menu(*, active: bool = False, trial_available: bool = True) -> InlineKeyboardMarkup:
     rows = []
     if active:
-        rows += [[InlineKeyboardButton(text='🔑 Подключить VPN', callback_data='my_vpn')], [InlineKeyboardButton(text='💳 Продлить доступ', callback_data='plans')]]
+        rows += [[InlineKeyboardButton(text='🔑 Мой VPN', callback_data='my_vpn')], [InlineKeyboardButton(text='💳 Продлить доступ', callback_data='plans')]]
     else:
         rows.append([InlineKeyboardButton(text='🛡 Купить VPN', callback_data='plans')])
         if trial_available:
