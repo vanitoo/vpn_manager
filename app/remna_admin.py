@@ -185,10 +185,12 @@ async def sync_remna_users_to_sqlite(db_path: str, users: list[dict[str, Any]]) 
                 continue
             username = row.get('username') or row.get('email') or ''
             full_name = row.get('email') or row.get('username') or f'Remnawave {tg}'
+            # Telegram is the source of truth for username/full_name. Remnawave values
+            # are only used when importing a Telegram ID that is not in the bot DB yet.
             await db.execute('''
                 INSERT INTO users (telegram_id, username, full_name, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, full_name=excluded.full_name, updated_at=excluded.updated_at
+                ON CONFLICT(telegram_id) DO NOTHING
             ''', (tg, username, full_name, ts, ts))
             cur = await db.execute('SELECT id FROM users WHERE telegram_id=?', (tg,))
             user_id = int((await cur.fetchone())['id'])
