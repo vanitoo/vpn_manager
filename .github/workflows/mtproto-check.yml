@@ -14,10 +14,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m compileall -q app mtproto_control
       - run: pip install -r requirements.txt
+      - run: python -m compileall -q app mtproto_control tests
       - run: python - <<'PY'
           import app.products.mtproto.storage
           import app.products.mtproto.client
           print('MTProto imports OK')
           PY
+      - run: python -m unittest -v tests.test_mtproto_storage
