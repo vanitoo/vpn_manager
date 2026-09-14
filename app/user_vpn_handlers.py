@@ -33,6 +33,8 @@ def connect_menu(subscription_url: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if page:
         rows.append([InlineKeyboardButton(text='⚡ Подключить VPN', url=page)])
+    if runtime.settings.mtproto_enabled:
+        rows.append([InlineKeyboardButton(text='🛡 Telegram Proxy', callback_data='mtproto')])
     rows += [
         [InlineKeyboardButton(text='💳 Продлить', callback_data='plans')],
         [InlineKeyboardButton(text='🧾 История платежей', callback_data='payment_history')],
@@ -57,7 +59,10 @@ async def show_user_home(callback: CallbackQuery) -> None:
         text = f"🛡 <b>VPN</b>\n\n🟢 Доступ активен до <b>{esc(str(sub['expires_at'])[:10])}</b>"
     else:
         text = '🛡 <b>VPN</b>\n\nПодключайтесь за минуту.'
-    await callback.message.answer(text, reply_markup=main_menu(active=bool(sub), trial_available=trial_available))
+    markup = main_menu(active=bool(sub), trial_available=trial_available)
+    if sub and runtime.settings.mtproto_enabled:
+        markup.inline_keyboard.insert(1, [InlineKeyboardButton(text='🛡 Telegram Proxy', callback_data='mtproto')])
+    await callback.message.answer(text, reply_markup=markup)
 
 
 @router.callback_query(F.data == 'home')
