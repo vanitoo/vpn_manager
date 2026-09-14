@@ -4,6 +4,7 @@ import asyncio
 import os
 
 from app.products.registry import ProductModule
+from app.products.mtproto.admin_entry import router as admin_router
 from app.products.mtproto.handlers import router
 from app.products.mtproto.service import reconcile_loop
 from app.products.mtproto.storage import init_mtproto_tables
@@ -15,4 +16,4 @@ async def initialize(db_path: str) -> None:
         asyncio.create_task(reconcile_loop(db_path), name='mtproto-reconcile')
 
 
-module = ProductModule(code='mtproto', routers=(router,), initialize=initialize)
+module = ProductModule(code='mtproto', routers=(admin_router, router), initialize=initialize)
