@@ -61,7 +61,7 @@ class MTProtoStorageTests(unittest.IsolatedAsyncioTestCase):
                 await db.execute('''
                     INSERT INTO payments
                         (provider,provider_payment_id,user_id,telegram_id,plan_id,amount_rub,currency,status,payment_url,payload,created_at,updated_at,paid_at,subscription_id)
-                    VALUES ('stars',?, ?,1001,?,199,'XTR','paid','','',?,?,?,?,?)
+                    VALUES ('stars',?, ?,1001,?,199,'XTR','paid','','',?,?,?,?)
                 ''', (f'p-{subscription_id}', user_id, plan_id, ts, ts, ts, subscription_id))
             await db.commit()
         return subscription_id
