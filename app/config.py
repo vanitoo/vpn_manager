@@ -86,6 +86,16 @@ class Settings:
     log_backup_count: int
     auto_setup_bot_menu: bool
     socks5_enabled: bool
+    mtproto_enabled: bool
+    mtproto_control_url: str
+    mtproto_control_token: str
+    mtproto_public_host: str
+    mtproto_public_port: int
+    mtproto_secret_key: str
+    mtproto_random_padding: bool
+    mtproto_auto_create: bool
+    mtproto_dry_run: bool
+    mtproto_reconcile_interval_seconds: int
     mailing_enabled: bool
     mailing_interval_seconds: int
     mailing_lookback_hours: int
@@ -162,6 +172,16 @@ def get_settings() -> Settings:
         log_backup_count=int(os.getenv('LOG_BACKUP_COUNT','5')),
         auto_setup_bot_menu=_bool(os.getenv('AUTO_SETUP_BOT_MENU'),True),
         socks5_enabled=_bool(os.getenv('SOCKS5_ENABLED'),False),
+        mtproto_enabled=_bool(os.getenv('MTPROTO_ENABLED'),False),
+        mtproto_control_url=os.getenv('MTPROTO_CONTROL_URL','').strip().rstrip('/'),
+        mtproto_control_token=os.getenv('MTPROTO_CONTROL_TOKEN','').strip(),
+        mtproto_public_host=os.getenv('MTPROTO_PUBLIC_HOST','').strip(),
+        mtproto_public_port=max(1, int(os.getenv('MTPROTO_PUBLIC_PORT','443'))),
+        mtproto_secret_key=os.getenv('MTPROTO_SECRET_KEY','').strip(),
+        mtproto_random_padding=_bool(os.getenv('MTPROTO_RANDOM_PADDING'),True),
+        mtproto_auto_create=_bool(os.getenv('MTPROTO_AUTO_CREATE'),False),
+        mtproto_dry_run=_bool(os.getenv('MTPROTO_DRY_RUN'),False),
+        mtproto_reconcile_interval_seconds=max(30, int(os.getenv('MTPROTO_RECONCILE_INTERVAL_SECONDS','60'))),
         mailing_enabled=_bool(os.getenv('MAILING_ENABLED'),True),
         mailing_interval_seconds=max(30, int(os.getenv('MAILING_INTERVAL_SECONDS','300'))),
         mailing_lookback_hours=max(1, int(os.getenv('MAILING_LOOKBACK_HOURS','24'))),
