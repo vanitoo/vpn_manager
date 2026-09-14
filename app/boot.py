@@ -66,7 +66,13 @@ async def setup_commands(bot: Bot) -> None:
         public.append(BotCommand(command='mtproto', description='Личный Telegram Proxy'))
     await bot.set_my_commands(public, scope=BotCommandScopeDefault())
     for admin_id in runtime.settings.admin_ids:
-        await bot.set_my_commands(public + [BotCommand(command='admin', description='Админка'), BotCommand(command='backup', description='Создать бэкап')], scope=BotCommandScopeChat(chat_id=admin_id))
+        admin_commands = public + [
+            BotCommand(command='admin', description='Админка'),
+            BotCommand(command='backup', description='Создать бэкап'),
+        ]
+        if runtime.settings.mtproto_enabled:
+            admin_commands.append(BotCommand(command='mtproto_admin', description='Управление MTProto'))
+        await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
     log.info('Telegram commands registered. Admin IDs: %s', runtime.settings.admin_ids)
 
 
