@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import CommandStart
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from app import runtime
 from app.keyboards import main_menu
@@ -32,6 +32,8 @@ async def render_start(message: Message, telegram_id: int) -> None:
     except Exception:
         text = template
     markup = main_menu(active=bool(subscription), trial_available=trial_available)
+    if subscription and runtime.settings.mtproto_enabled:
+        markup.inline_keyboard.insert(1, [InlineKeyboardButton(text='🛡 Telegram Proxy', callback_data='mtproto')])
 
     if cfg.enabled and cfg.image_enabled and cfg.image_file_id:
         await message.answer_photo(photo=cfg.image_file_id, caption=text[:1024], reply_markup=markup)
