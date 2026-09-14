@@ -62,6 +62,8 @@ def setup_logging() -> None:
 
 async def setup_commands(bot: Bot) -> None:
     public = [BotCommand(command='start', description='Главное меню'), BotCommand(command='cancel', description='Отменить текущее действие')]
+    if runtime.settings.mtproto_enabled:
+        public.append(BotCommand(command='mtproto', description='Личный Telegram Proxy'))
     await bot.set_my_commands(public, scope=BotCommandScopeDefault())
     for admin_id in runtime.settings.admin_ids:
         await bot.set_my_commands(public + [BotCommand(command='admin', description='Админка'), BotCommand(command='backup', description='Создать бэкап')], scope=BotCommandScopeChat(chat_id=admin_id))
@@ -101,6 +103,7 @@ async def main() -> None:
     log.info('DB=%s LOG=%s', runtime.settings.db_path, runtime.settings.log_file)
     log.info('Payments=%s', runtime.settings.payment_providers)
     log.info('Remnawave base=%s token_set=%s squad_set=%s', runtime.settings.remnawave_base_url, bool(runtime.settings.remnawave_api_token), bool(runtime.settings.remnawave_internal_squad_uuid))
+    log.info('MTProto enabled=%s control_set=%s dry_run=%s', runtime.settings.mtproto_enabled, bool(runtime.settings.mtproto_control_url), runtime.settings.mtproto_dry_run)
 
     await runtime.init_db(runtime.settings.db_path); await runtime.init_admin_tables(runtime.settings.db_path)
     await init_mailing_tables(runtime.settings.db_path); await init_faq_tables(runtime.settings.db_path); await init_support_tables(runtime.settings.db_path); await init_start_content(runtime.settings.db_path)
@@ -112,7 +115,10 @@ async def main() -> None:
     dp.include_router(start_content_admin_router)
     dp.include_router(admin_users_router); dp.include_router(admin_ops_router); dp.include_router(admin_squads_router); dp.include_router(admin_mailing_router); dp.include_router(admin_plan_router); dp.include_router(admin_remna_router)
     dp.include_router(start_screen_router)
-    for product_module in enabled_product_modules(socks5_enabled=runtime.settings.socks5_enabled):
+    for product_module in enabled_product_modules(
+        socks5_enabled=runtime.settings.socks5_enabled,
+        mtproto_enabled=runtime.settings.mtproto_enabled,
+    ):
         if product_module.initialize: await product_module.initialize(runtime.settings.db_path)
         for product_router in product_module.routers: dp.include_router(product_router)
         log.info('Product module enabled: %s', product_module.code)
