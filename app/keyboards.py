@@ -75,6 +75,7 @@ def admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text='🛟 Поддержка', callback_data='admin:support'), InlineKeyboardButton(text='📣 Рассылки', callback_data='admin:mailing')],
         [InlineKeyboardButton(text='❓ FAQ', callback_data='admin:faq'), InlineKeyboardButton(text='👋 Старт /start', callback_data='admin:start')],
         [InlineKeyboardButton(text='📜 Логи', callback_data='admin:logs'), InlineKeyboardButton(text='ℹ️ Система', callback_data='admin:system')],
+        [InlineKeyboardButton(text='🛡 MTProto', callback_data='admin:mtproto')],
         [InlineKeyboardButton(text='🌍 Remnawave', callback_data='admin:remna')],
     ])
 
