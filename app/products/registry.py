@@ -18,7 +18,7 @@ class ProductModule:
     initialize: Initializer | None = None
 
 
-def enabled_product_modules(*, socks5_enabled: bool) -> tuple[ProductModule, ...]:
+def enabled_product_modules(*, socks5_enabled: bool, mtproto_enabled: bool = False) -> tuple[ProductModule, ...]:
     """Load enabled modules lazily so disabled products cannot break VPN startup."""
 
     modules: list[ProductModule] = []
@@ -26,5 +26,8 @@ def enabled_product_modules(*, socks5_enabled: bool) -> tuple[ProductModule, ...
         from app.products.socks5 import module
 
         modules.append(module)
-    return tuple(modules)
+    if mtproto_enabled:
+        from app.products.mtproto import module
 
+        modules.append(module)
+    return tuple(modules)
