@@ -126,28 +126,52 @@ async def list_plans_mtproto(db_path: str) -> list[dict[str, Any]]:
             return [dict(row) for row in await cur.fetchall()]
 
 
-_PAID_ENTITLEMENT_SQL = '''
+_PAYMENT_EXISTS_SQL = '''
+    EXISTS (
+        SELECT 1
+        FROM payments pay
+        WHERE pay.telegram_id=s.telegram_id
+          AND pay.status IN ('paid','succeeded')
+          AND (
+              pay.subscription_id=s.id
+              OR (
+                  pay.subscription_id IS NULL
+                  AND pay.plan_id=s.plan_id
+                  AND pay.created_at>=s.created_at
+              )
+          )
+    )
+'''
+
+_FRIEND_GRANT_EXISTS_SQL = '''
+    EXISTS (
+        SELECT 1
+        FROM access_grants grant_row
+        WHERE grant_row.telegram_id=s.telegram_id
+          AND grant_row.subscription_id=s.id
+          AND grant_row.plan_id=s.plan_id
+          AND grant_row.status='active'
+          AND COALESCE(grant_row.kind, 'friend')='friend'
+    )
+'''
+
+_MT_ENTITLEMENT_SQL = f'''
     SELECT s.*, p.title AS plan_title, p.slug AS plan_slug,
-           COALESCE(p.mtproto_enabled, 0) AS mtproto_enabled
+           COALESCE(p.mtproto_enabled, 0) AS mtproto_enabled,
+           CASE
+               WHEN {_PAYMENT_EXISTS_SQL} THEN 'paid'
+               WHEN {_FRIEND_GRANT_EXISTS_SQL} THEN 'friend'
+               ELSE ''
+           END AS entitlement_source
     FROM subscriptions s
     JOIN plans p ON p.id=s.plan_id
     WHERE s.telegram_id=?
       AND s.status='active'
       AND s.expires_at>?
       AND COALESCE(p.mtproto_enabled, 0)=1
-      AND EXISTS (
-          SELECT 1
-          FROM payments pay
-          WHERE pay.telegram_id=s.telegram_id
-            AND pay.status IN ('paid','succeeded')
-            AND (
-                pay.subscription_id=s.id
-                OR (
-                    pay.subscription_id IS NULL
-                    AND pay.plan_id=s.plan_id
-                    AND pay.created_at>=s.created_at
-                )
-            )
+      AND (
+          {_PAYMENT_EXISTS_SQL}
+          OR {_FRIEND_GRANT_EXISTS_SQL}
       )
     ORDER BY s.expires_at DESC, s.id DESC
     LIMIT 1
@@ -155,35 +179,33 @@ _PAID_ENTITLEMENT_SQL = '''
 
 
 async def get_paid_entitlement(db_path: str, telegram_id: int) -> dict[str, Any] | None:
+    """Return MTProto entitlement from a payment or an active admin friend grant.
+
+    The legacy function name is kept to avoid breaking the feature branch API.
+    Trial subscriptions do not qualify because they have neither a successful
+    payment nor an active friend grant.
+    """
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(_PAID_ENTITLEMENT_SQL, (telegram_id, now_iso())) as cur:
+        async with db.execute(_MT_ENTITLEMENT_SQL, (telegram_id, now_iso())) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
 
 async def list_paid_entitled_telegram_ids(db_path: str) -> list[int]:
+    """List IDs entitled by payment or an active admin friend grant."""
     now = now_iso()
     async with aiosqlite.connect(db_path) as db:
-        async with db.execute('''
+        async with db.execute(f'''
             SELECT DISTINCT s.telegram_id
             FROM subscriptions s
             JOIN plans p ON p.id=s.plan_id
             WHERE s.status='active'
               AND s.expires_at>?
               AND COALESCE(p.mtproto_enabled, 0)=1
-              AND EXISTS (
-                  SELECT 1 FROM payments pay
-                  WHERE pay.telegram_id=s.telegram_id
-                    AND pay.status IN ('paid','succeeded')
-                    AND (
-                        pay.subscription_id=s.id
-                        OR (
-                            pay.subscription_id IS NULL
-                            AND pay.plan_id=s.plan_id
-                            AND pay.created_at>=s.created_at
-                        )
-                    )
+              AND (
+                  {_PAYMENT_EXISTS_SQL}
+                  OR {_FRIEND_GRANT_EXISTS_SQL}
               )
             ORDER BY s.telegram_id
         ''', (now,)) as cur:
