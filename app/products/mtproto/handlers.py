@@ -10,11 +10,11 @@ from app.products.mtproto.service import (
     configuration_error,
     control_client,
     ensure_enabled,
+    entitlement_for,
     reconcile_once,
     rotate,
 )
 from app.products.mtproto.storage import (
-    get_paid_entitlement,
     list_accesses,
     list_plans_mtproto,
     set_plan_enabled,
@@ -59,7 +59,7 @@ async def render_user(message: Message, telegram_id: int) -> None:
             reply_markup=back_menu(),
         )
         return
-    entitlement = await get_paid_entitlement(runtime.settings.db_path, telegram_id)
+    entitlement = await entitlement_for(runtime.settings.db_path, telegram_id)
     if not entitlement:
         await message.answer(
             '🛡 <b>Telegram Proxy</b>\n\n'
@@ -71,10 +71,11 @@ async def render_user(message: Message, telegram_id: int) -> None:
         return
     view = await access_view(runtime.settings.db_path, telegram_id)
     if not view:
+        admin_note = '\n\n🛠 Для администратора включён служебный override для тестирования.' if entitlement.get('admin_override') else ''
         await message.answer(
             '🛡 <b>Личный Telegram Proxy</b>\n\n'
             'У вас есть право на MTProto. Создайте личный код — он будет действовать, '
-            'пока активен оплаченный тариф.',
+            'пока активно право доступа.' + admin_note,
             reply_markup=create_menu(),
         )
         return
@@ -87,13 +88,15 @@ async def render_user(message: Message, telegram_id: int) -> None:
                 reply_markup=back_menu(),
             )
             return
+    entitlement = view.entitlement or entitlement
+    admin_note = '\nРежим: <b>admin override</b>' if entitlement.get('admin_override') else ''
     await message.answer(
         '🛡 <b>Ваш личный Telegram Proxy</b>\n\n'
         f'Сервер: <code>{esc(runtime.settings.mtproto_public_host)}</code>\n'
         f'Порт: <code>{runtime.settings.mtproto_public_port}</code>\n'
         f'Код: <code>{esc(view.public_secret)}</code>\n'
-        f'Тариф: <b>{esc((view.entitlement or {}).get("plan_title") or "оплачен")}</b>\n\n'
-        'Код индивидуальный. При окончании тарифа он отключится автоматически; '
+        f'Тариф: <b>{esc(entitlement.get("plan_title") or "оплачен")}</b>{admin_note}\n\n'
+        'Код индивидуальный. При окончании права доступа он отключится автоматически; '
         'после продления включится снова.',
         reply_markup=access_menu(view.connect_url),
     )
@@ -150,7 +153,9 @@ async def mtproto_rotate_confirm(callback: CallbackQuery) -> None:
 
 
 def admin_menu(plans: list[dict], *, controller_ok: bool, accesses: list[dict]) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text='👤 Мой MTProto', callback_data='mtproto')],
+    ]
     for plan in plans:
         enabled = bool(int(plan.get('mtproto_enabled') or 0))
         rows.append([InlineKeyboardButton(
@@ -184,7 +189,8 @@ async def render_admin(message: Message) -> None:
         f"Feature: <b>{'ON' if runtime.settings.mtproto_enabled else 'OFF'}</b>\n"
         f'Controller: <b>{esc(health_text)}</b>\n'
         f'Host: <code>{esc(runtime.settings.mtproto_public_host or "-")}</code>:{runtime.settings.mtproto_public_port}\n'
-        f'Auto-create: <b>{"ON" if runtime.settings.mtproto_auto_create else "OFF"}</b>\n\n'
+        f'Auto-create: <b>{"ON" if runtime.settings.mtproto_auto_create else "OFF"}</b>\n'
+        'Admin access: <b>always allowed for testing</b>\n\n'
         f'Активных кодов: <b>{active}</b>\n'
         f'Отключённых: <b>{disabled}</b>\n'
         f'Ошибок: <b>{errors}</b>'
