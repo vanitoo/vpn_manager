@@ -57,6 +57,34 @@ def configuration_error() -> str:
     return ''
 
 
+def _admin_entitlement(telegram_id: int) -> dict | None:
+    admin_ids = {int(value) for value in (getattr(runtime.settings, 'admin_ids', ()) or ())}
+    if int(telegram_id) not in admin_ids:
+        return None
+    return {
+        'telegram_id': int(telegram_id),
+        'plan_title': 'Администратор',
+        'plan_slug': 'admin-override',
+        'mtproto_enabled': 1,
+        'admin_override': 1,
+        'status': 'active',
+    }
+
+
+async def entitlement_for(db_path: str, telegram_id: int) -> dict | None:
+    """Return a normal paid entitlement or an explicit admin testing override."""
+    paid = await get_paid_entitlement(db_path, telegram_id)
+    if paid:
+        return paid
+    return _admin_entitlement(telegram_id)
+
+
+async def entitled_telegram_ids(db_path: str) -> list[int]:
+    ids = set(await list_paid_entitled_telegram_ids(db_path))
+    ids.update(int(value) for value in (getattr(runtime.settings, 'admin_ids', ()) or ()))
+    return sorted(ids)
+
+
 def secret_for(telegram_id: int, generation: int) -> str:
     key = runtime.settings.mtproto_secret_key.encode('utf-8')
     msg = f'mtproto:{int(telegram_id)}:{int(generation)}'.encode('utf-8')
@@ -90,7 +118,7 @@ async def access_view(db_path: str, telegram_id: int) -> MTProtoAccessView | Non
         secret=base_secret,
         public_secret=shown_secret,
         connect_url=connect_url(shown_secret),
-        entitlement=await get_paid_entitlement(db_path, telegram_id),
+        entitlement=await entitlement_for(db_path, telegram_id),
         last_error=str(row.get('last_error') or ''),
     )
 
@@ -99,7 +127,7 @@ async def ensure_enabled(db_path: str, telegram_id: int) -> MTProtoAccessView:
     error = configuration_error()
     if error:
         raise RuntimeError(error)
-    entitlement = await get_paid_entitlement(db_path, telegram_id)
+    entitlement = await entitlement_for(db_path, telegram_id)
     if not entitlement:
         raise PermissionError('MTProto доступен только при активном оплаченном тарифе с включённой опцией')
 
@@ -136,7 +164,7 @@ async def rotate(db_path: str, telegram_id: int) -> MTProtoAccessView:
     error = configuration_error()
     if error:
         raise RuntimeError(error)
-    entitlement = await get_paid_entitlement(db_path, telegram_id)
+    entitlement = await entitlement_for(db_path, telegram_id)
     if not entitlement:
         raise PermissionError('Нет активного оплаченного права на MTProto')
 
@@ -181,14 +209,14 @@ async def reconcile_once(db_path: str) -> dict[str, int]:
 
     if runtime.settings.mtproto_auto_create:
         existing_ids = {int(row['telegram_id']) for row in await list_accesses(db_path)}
-        for telegram_id in await list_paid_entitled_telegram_ids(db_path):
+        for telegram_id in await entitled_telegram_ids(db_path):
             if telegram_id not in existing_ids:
                 await ensure_access_row(db_path, telegram_id)
                 result['created'] += 1
 
     for row in await list_accesses(db_path):
         telegram_id = int(row['telegram_id'])
-        entitlement = await get_paid_entitlement(db_path, telegram_id)
+        entitlement = await entitlement_for(db_path, telegram_id)
         status = str(row.get('status') or 'disabled')
         try:
             if entitlement:
