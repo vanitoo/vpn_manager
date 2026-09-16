@@ -48,6 +48,15 @@ def access_menu(url: str) -> InlineKeyboardMarkup:
     ])
 
 
+def entitlement_note(entitlement: dict) -> str:
+    source = str(entitlement.get('entitlement_source') or '')
+    if entitlement.get('admin_override') or source == 'admin':
+        return '🛠 Доступ: <b>admin override</b>'
+    if source == 'friend':
+        return '🎁 Доступ: <b>выдан администратором</b>'
+    return '💳 Доступ: <b>оплаченный тариф</b>'
+
+
 async def render_user(message: Message, telegram_id: int) -> None:
     if not runtime.settings.mtproto_enabled:
         await message.answer('🛡 Telegram Proxy сейчас выключен.', reply_markup=back_menu())
@@ -63,19 +72,19 @@ async def render_user(message: Message, telegram_id: int) -> None:
     if not entitlement:
         await message.answer(
             '🛡 <b>Telegram Proxy</b>\n\n'
-            'Доступен только при активном <b>оплаченном</b> тарифе, '
-            'для которого включена опция Telegram Proxy.\n\n'
-            'Тестовый и бесплатный доступ не подходят.',
+            'Доступен при активном тарифе, для которого включена опция <b>Telegram Proxy</b>.\n\n'
+            'Подходят оплаченный тариф или бесплатный доступ, выданный администратором. '
+            'Тестовый доступ без отдельной выдачи не подходит.',
             reply_markup=back_menu(),
         )
         return
     view = await access_view(runtime.settings.db_path, telegram_id)
     if not view:
-        admin_note = '\n\n🛠 Для администратора включён служебный override для тестирования.' if entitlement.get('admin_override') else ''
         await message.answer(
             '🛡 <b>Личный Telegram Proxy</b>\n\n'
             'У вас есть право на MTProto. Создайте личный код — он будет действовать, '
-            'пока активно право доступа.' + admin_note,
+            'пока активно право доступа.\n\n'
+            f'{entitlement_note(entitlement)}',
             reply_markup=create_menu(),
         )
         return
@@ -89,15 +98,15 @@ async def render_user(message: Message, telegram_id: int) -> None:
             )
             return
     entitlement = view.entitlement or entitlement
-    admin_note = '\nРежим: <b>admin override</b>' if entitlement.get('admin_override') else ''
     await message.answer(
         '🛡 <b>Ваш личный Telegram Proxy</b>\n\n'
         f'Сервер: <code>{esc(runtime.settings.mtproto_public_host)}</code>\n'
         f'Порт: <code>{runtime.settings.mtproto_public_port}</code>\n'
         f'Код: <code>{esc(view.public_secret)}</code>\n'
-        f'Тариф: <b>{esc(entitlement.get("plan_title") or "оплачен")}</b>{admin_note}\n\n'
+        f'Тариф: <b>{esc(entitlement.get("plan_title") or "доступ")}</b>\n'
+        f'{entitlement_note(entitlement)}\n\n'
         'Код индивидуальный. При окончании права доступа он отключится автоматически; '
-        'после продления включится снова.',
+        'после продления или новой выдачи включится снова.',
         reply_markup=access_menu(view.connect_url),
     )
 
@@ -190,6 +199,7 @@ async def render_admin(message: Message) -> None:
         f'Controller: <b>{esc(health_text)}</b>\n'
         f'Host: <code>{esc(runtime.settings.mtproto_public_host or "-")}</code>:{runtime.settings.mtproto_public_port}\n'
         f'Auto-create: <b>{"ON" if runtime.settings.mtproto_auto_create else "OFF"}</b>\n'
+        'Право: <b>оплата или активный тариф «друга» с MTProto ON</b>\n'
         'Admin access: <b>always allowed for testing</b>\n\n'
         f'Активных кодов: <b>{active}</b>\n'
         f'Отключённых: <b>{disabled}</b>\n'
