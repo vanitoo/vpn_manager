@@ -6,6 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from app import runtime
+from app.admin_db import init_admin_tables
 from app.db import init_db
 from app.products.mtproto.service import entitlement_for
 from app.products.mtproto.storage import init_mtproto_tables
@@ -16,6 +17,7 @@ class MTProtoAdminOverrideTests(unittest.IsolatedAsyncioTestCase):
         fd, self.db_path = tempfile.mkstemp(prefix='mtproto-admin-', suffix='.sqlite3')
         os.close(fd)
         await init_db(self.db_path)
+        await init_admin_tables(self.db_path)
         await init_mtproto_tables(self.db_path)
         self.old_settings = runtime.settings
         runtime.settings = SimpleNamespace(admin_ids=(1001,))
