@@ -8,10 +8,11 @@ The MTProto product is isolated from the VPN/Remnawave fulfillment path. It is d
 
 - one credential per Telegram ID;
 - credential is created on demand by default (`MTPROTO_AUTO_CREATE=false`);
-- only an active **paid** subscription whose plan has `mtproto_enabled=1` is eligible;
-- trials and admin/friend grants do not qualify without a matching successful payment;
-- when the paid entitlement expires, reconcile disables the credential;
-- after renewal, reconcile enables the same credential again;
+- an active subscription whose plan has `mtproto_enabled=1` is eligible when it is backed by either a successful payment or an active admin `friend` grant;
+- trial access by itself does not qualify;
+- admins listed in `ADMIN_IDS` have an explicit testing override even without a paid/friend entitlement;
+- when the qualifying entitlement expires or a friend grant is revoked, reconcile disables the credential;
+- after renewal or a new qualifying friend grant, reconcile enables the same credential again;
 - rotation increments a local generation and replaces the secret;
 - user secrets are not stored in SQLite. A 16-byte base secret is deterministically derived with HMAC-SHA256 from `MTPROTO_SECRET_KEY`, Telegram ID and generation;
 - `dd` random-padding prefix is added only to the client-visible secret when `MTPROTO_RANDOM_PADDING=true`. The controller receives the 32-hex-character base secret expected by MTProxy.
@@ -51,17 +52,25 @@ Use:
 
 The screen shows controller health, current credential counters and every tariff. Toggle MTProto per tariff there.
 
+For a service/friend tariff, `MTProto ON` means that a user who receives that tariff through the admin `friend` grant can create their own personal MTProto code without making a payment.
+
 A manual reconcile is also available. It is useful after changing tariff eligibility.
 
 ## User flow
 
-When MTProto is globally enabled, active VPN users see `🛡 Telegram Proxy` and can also use:
+When MTProto is globally enabled, eligible VPN users see `🛡 Telegram Proxy` and can also use:
 
 ```text
 /mtproto
 ```
 
-Eligible users get `🚀 Создать личный Telegram Proxy`. The bot returns a Telegram proxy deep link:
+Eligible users include:
+
+- users with an active paid subscription on a plan with MTProto enabled;
+- users with an active admin-issued friend grant on a plan with MTProto enabled;
+- admins via the explicit testing override.
+
+They get `🚀 Создать личный Telegram Proxy`. The bot returns a Telegram proxy deep link:
 
 ```text
 https://t.me/proxy?server=<host>&port=<port>&secret=<secret>
@@ -125,7 +134,7 @@ MTPROTO_PUBLIC_PORT=443
 MTPROTO_SECRET_KEY=<stable random value>
 ```
 
-Restart the bot, open `/mtproto_admin`, enable MTProto on one paid tariff and test the user flow. Dry-run changes only the bot database; it does not touch the real MTProxy.
+Restart the bot, open `/mtproto_admin`, enable MTProto on one paid or service/friend tariff and test the user flow. Dry-run changes only the bot database; it does not touch the real MTProxy.
 
 After the current MTProto container image/mounts/start command are known, implement or adapt the controller to that exact service and switch `MTPROTO_DRY_RUN=false`.
 
@@ -133,9 +142,9 @@ After the current MTProto container image/mounts/start command are known, implem
 
 The reconcile loop runs every `MTPROTO_RECONCILE_INTERVAL_SECONDS` (minimum 30 seconds):
 
-1. if `MTPROTO_AUTO_CREATE=true`, create rows for all currently eligible paid users;
+1. if `MTPROTO_AUTO_CREATE=true`, create rows for all currently eligible paid, friend-grant and admin users;
 2. eligible row + not active -> enable at controller;
 3. no entitlement + active/error/provisioning row -> disable at controller;
 4. controller failures are recorded in `mtproto_access.last_error` and retried on later runs.
 
-The database row is retained when access expires. This lets a renewed customer reuse the same Telegram proxy link automatically.
+The database row is retained when access expires or a friend grant is revoked. This lets a renewed/re-granted customer reuse the same Telegram proxy link automatically.
