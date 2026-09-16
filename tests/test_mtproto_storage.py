@@ -7,12 +7,14 @@ from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 
+from app.admin_db import init_admin_tables
 from app.db import init_db, now_iso
 from app.products.mtproto.storage import (
     ensure_access_row,
     get_access,
     get_paid_entitlement,
     init_mtproto_tables,
+    list_paid_entitled_telegram_ids,
     rotate_generation,
     set_plan_enabled,
 )
@@ -23,6 +25,7 @@ class MTProtoStorageTests(unittest.IsolatedAsyncioTestCase):
         fd, self.db_path = tempfile.mkstemp(prefix='mtproto-test-', suffix='.sqlite3')
         os.close(fd)
         await init_db(self.db_path)
+        await init_admin_tables(self.db_path)
         await init_mtproto_tables(self.db_path)
         ts = now_iso()
         async with aiosqlite.connect(self.db_path) as db:
@@ -43,7 +46,7 @@ class MTProtoStorageTests(unittest.IsolatedAsyncioTestCase):
         except FileNotFoundError:
             pass
 
-    async def _create_subscription(self, *, paid: bool) -> int:
+    async def _create_subscription(self, *, paid: bool = False, friend: bool = False) -> int:
         ts = now_iso()
         expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         async with aiosqlite.connect(self.db_path) as db:
@@ -63,6 +66,12 @@ class MTProtoStorageTests(unittest.IsolatedAsyncioTestCase):
                         (provider,provider_payment_id,user_id,telegram_id,plan_id,amount_rub,currency,status,payment_url,payload,created_at,updated_at,paid_at,subscription_id)
                     VALUES ('stars',?, ?,1001,?,199,'XTR','paid','','',?,?,?,?)
                 ''', (f'p-{subscription_id}', user_id, plan_id, ts, ts, ts, subscription_id))
+            if friend:
+                await db.execute('''
+                    INSERT INTO access_grants
+                        (telegram_id,subscription_id,plan_id,kind,granted_by,granted_at,status)
+                    VALUES (1001,?,?, 'friend',999,?,'active')
+                ''', (subscription_id, plan_id, ts))
             await db.commit()
         return subscription_id
 
@@ -71,13 +80,32 @@ class MTProtoStorageTests(unittest.IsolatedAsyncioTestCase):
         entitlement = await get_paid_entitlement(self.db_path, 1001)
         self.assertIsNotNone(entitlement)
         self.assertEqual(entitlement['plan_slug'], 'paid')
+        self.assertEqual(entitlement['entitlement_source'], 'paid')
 
-    async def test_without_successful_payment_is_not_entitled(self) -> None:
-        await self._create_subscription(paid=False)
+    async def test_active_friend_grant_enabled_plan_is_entitled(self) -> None:
+        await self._create_subscription(friend=True)
+        entitlement = await get_paid_entitlement(self.db_path, 1001)
+        self.assertIsNotNone(entitlement)
+        self.assertEqual(entitlement['entitlement_source'], 'friend')
+        self.assertIn(1001, await list_paid_entitled_telegram_ids(self.db_path))
+
+    async def test_without_payment_or_friend_grant_is_not_entitled(self) -> None:
+        await self._create_subscription()
         self.assertIsNone(await get_paid_entitlement(self.db_path, 1001))
 
+    async def test_revoked_friend_grant_is_not_entitled(self) -> None:
+        subscription_id = await self._create_subscription(friend=True)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE access_grants SET status='revoked', revoked_at=? WHERE subscription_id=?",
+                (now_iso(), subscription_id),
+            )
+            await db.commit()
+        self.assertIsNone(await get_paid_entitlement(self.db_path, 1001))
+        self.assertNotIn(1001, await list_paid_entitled_telegram_ids(self.db_path))
+
     async def test_plan_toggle_revokes_entitlement(self) -> None:
-        await self._create_subscription(paid=True)
+        await self._create_subscription(friend=True)
         async with aiosqlite.connect(self.db_path) as db:
             cur = await db.execute("SELECT id FROM plans WHERE slug='paid'")
             plan_id = int((await cur.fetchone())[0])
