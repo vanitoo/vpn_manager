@@ -19,6 +19,7 @@ from app.admin_ops import router as admin_ops_router
 from app.admin_plan_handlers import router as admin_plan_router
 from app.admin_remna_handlers import router as admin_remna_router
 from app.admin_squads_handlers import router as admin_squads_router
+from app.admin_user_mutations import router as admin_user_mutations_router
 from app.admin_users_handlers import router as admin_users_router
 from app.backup_handlers import router as backup_router
 from app.common_fsm import router as common_fsm_router
@@ -110,7 +111,7 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage()); dp.callback_query.outer_middleware(DeleteOldMenuMiddleware())
     dp.include_router(common_fsm_router); dp.include_router(support_router); dp.include_router(user_vpn_router); dp.include_router(faq_router); dp.include_router(external_payment_router); dp.include_router(backup_router)
     dp.include_router(start_content_admin_router)
-    dp.include_router(admin_users_router); dp.include_router(admin_ops_router); dp.include_router(admin_squads_router); dp.include_router(admin_mailing_router); dp.include_router(admin_plan_router); dp.include_router(admin_remna_router)
+    dp.include_router(admin_user_mutations_router); dp.include_router(admin_users_router); dp.include_router(admin_ops_router); dp.include_router(admin_squads_router); dp.include_router(admin_mailing_router); dp.include_router(admin_plan_router); dp.include_router(admin_remna_router)
     dp.include_router(start_screen_router)
     for product_module in enabled_product_modules(socks5_enabled=runtime.settings.socks5_enabled):
         if product_module.initialize: await product_module.initialize(runtime.settings.db_path)
