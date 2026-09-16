@@ -66,16 +66,17 @@ def _admin_entitlement(telegram_id: int) -> dict | None:
         'plan_title': 'Администратор',
         'plan_slug': 'admin-override',
         'mtproto_enabled': 1,
+        'entitlement_source': 'admin',
         'admin_override': 1,
         'status': 'active',
     }
 
 
 async def entitlement_for(db_path: str, telegram_id: int) -> dict | None:
-    """Return a normal paid entitlement or an explicit admin testing override."""
-    paid = await get_paid_entitlement(db_path, telegram_id)
-    if paid:
-        return paid
+    """Return entitlement from payment, friend grant, or explicit admin override."""
+    subscription_entitlement = await get_paid_entitlement(db_path, telegram_id)
+    if subscription_entitlement:
+        return subscription_entitlement
     return _admin_entitlement(telegram_id)
 
 
@@ -129,7 +130,7 @@ async def ensure_enabled(db_path: str, telegram_id: int) -> MTProtoAccessView:
         raise RuntimeError(error)
     entitlement = await entitlement_for(db_path, telegram_id)
     if not entitlement:
-        raise PermissionError('MTProto доступен только при активном оплаченном тарифе с включённой опцией')
+        raise PermissionError('MTProto доступен только при активном тарифе с включённой опцией Telegram Proxy')
 
     row = await ensure_access_row(db_path, telegram_id)
     generation = int(row.get('generation') or 1)
@@ -166,7 +167,7 @@ async def rotate(db_path: str, telegram_id: int) -> MTProtoAccessView:
         raise RuntimeError(error)
     entitlement = await entitlement_for(db_path, telegram_id)
     if not entitlement:
-        raise PermissionError('Нет активного оплаченного права на MTProto')
+        raise PermissionError('Нет активного права на MTProto')
 
     old = await ensure_access_row(db_path, telegram_id)
     old_generation = int(old.get('generation') or 1)
