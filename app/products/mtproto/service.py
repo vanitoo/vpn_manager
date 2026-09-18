@@ -52,6 +52,15 @@ def configuration_error() -> str:
         return 'MTPROTO_PUBLIC_HOST is empty'
     if settings.mtproto_public_port <= 0:
         return 'MTPROTO_PUBLIC_PORT is invalid'
+    mode = str(getattr(settings, 'mtproto_secret_mode', '') or '').strip().lower()
+    if mode not in {'faketls', 'random_padding', 'plain'}:
+        return 'MTPROTO_SECRET_MODE must be faketls, random_padding or plain'
+    if mode == 'faketls':
+        domain = str(getattr(settings, 'mtproto_fake_tls_domain', '') or '').strip()
+        if not domain:
+            return 'MTPROTO_FAKE_TLS_DOMAIN is empty'
+        if '://' in domain or '/' in domain or any(ch.isspace() for ch in domain):
+            return 'MTPROTO_FAKE_TLS_DOMAIN must be a hostname only'
     if not settings.mtproto_dry_run and not settings.mtproto_control_url:
         return 'MTPROTO_CONTROL_URL is empty'
     return ''
@@ -93,7 +102,14 @@ def secret_for(telegram_id: int, generation: int) -> str:
 
 
 def public_secret(base_secret: str) -> str:
-    return f'dd{base_secret}' if runtime.settings.mtproto_random_padding else base_secret
+    mode = str(getattr(runtime.settings, 'mtproto_secret_mode', '') or '').strip().lower()
+    if mode == 'faketls':
+        domain = str(getattr(runtime.settings, 'mtproto_fake_tls_domain', '') or '').strip()
+        domain_hex = domain.encode('utf-8').hex()
+        return f'ee{base_secret}{domain_hex}'
+    if mode == 'random_padding':
+        return f'dd{base_secret}'
+    return base_secret
 
 
 def connect_url(secret: str) -> str:
