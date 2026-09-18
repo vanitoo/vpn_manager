@@ -92,6 +92,8 @@ class Settings:
     mtproto_public_host: str
     mtproto_public_port: int
     mtproto_secret_key: str
+    mtproto_secret_mode: str
+    mtproto_fake_tls_domain: str
     mtproto_random_padding: bool
     mtproto_auto_create: bool
     mtproto_dry_run: bool
@@ -178,6 +180,8 @@ def get_settings() -> Settings:
         mtproto_public_host=os.getenv('MTPROTO_PUBLIC_HOST','').strip(),
         mtproto_public_port=max(1, int(os.getenv('MTPROTO_PUBLIC_PORT','443'))),
         mtproto_secret_key=os.getenv('MTPROTO_SECRET_KEY','').strip(),
+        mtproto_secret_mode=(os.getenv('MTPROTO_SECRET_MODE','').strip().lower() or ('random_padding' if _bool(os.getenv('MTPROTO_RANDOM_PADDING'),True) else 'plain')),
+        mtproto_fake_tls_domain=os.getenv('MTPROTO_FAKE_TLS_DOMAIN','www.cloudflare.com').strip(),
         mtproto_random_padding=_bool(os.getenv('MTPROTO_RANDOM_PADDING'),True),
         mtproto_auto_create=_bool(os.getenv('MTPROTO_AUTO_CREATE'),False),
         mtproto_dry_run=_bool(os.getenv('MTPROTO_DRY_RUN'),False),
