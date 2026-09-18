@@ -177,16 +177,27 @@ async def put_user(request: web.Request) -> web.Response:
 
     async with LOCK:
         old_state = _load_state()
-        new_state = json.loads(json.dumps(old_state))
-        new_state[str(numeric_id)] = {'secret': secret, 'enabled': enabled}
-        _persist_state(new_state)
+        desired = {'secret': secret, 'enabled': enabled}
 
-        ok, detail = await _apply_backend()
-        if not ok:
-            _persist_state(old_state)
-            # Best effort: ask the backend to restore the previous manifest too.
-            await _apply_backend()
-            raise web.HTTPServiceUnavailable(text=detail)
+        if old_state.get(str(numeric_id)) == desired:
+            # Idempotent no-op: do not rewrite the manifest and do not trigger a
+            # proxy reload. Still verify that the proxy acknowledged the current
+            # manifest so reconcile can heal a lost/restarted backend.
+            ok, detail = await _apply_backend()
+            if not ok:
+                raise web.HTTPServiceUnavailable(text=detail)
+            new_state = old_state
+        else:
+            new_state = json.loads(json.dumps(old_state))
+            new_state[str(numeric_id)] = desired
+            _persist_state(new_state)
+
+            ok, detail = await _apply_backend()
+            if not ok:
+                _persist_state(old_state)
+                # Best effort: ask the backend to restore the previous manifest too.
+                await _apply_backend()
+                raise web.HTTPServiceUnavailable(text=detail)
 
     return web.json_response({
         'ok': True,
