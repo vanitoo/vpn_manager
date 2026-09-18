@@ -5,5 +5,25 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    depends_on:
+      - mtproto-control
     volumes:
       - ./:/app
+
+  mtproto-control:
+    build:
+      context: ./mtproto_control
+    container_name: mtproto-control
+    restart: unless-stopped
+    environment:
+      MTPROTO_CONTROL_TOKEN: "${MTPROTO_CONTROL_TOKEN:-}"
+      MTPROTO_CONTROL_DRY_RUN: "${MTPROTO_DRY_RUN:-false}"
+      MTPROTO_APPLY_MODE: "${MTPROTO_APPLY_MODE:-watch}"
+      MTPROTO_APPLY_ACK_FILE: "/data/active_secrets.applied.sha256"
+      MTPROTO_APPLY_TIMEOUT_SECONDS: "${MTPROTO_APPLY_TIMEOUT_SECONDS:-15}"
+    volumes:
+      - mtproto-control-data:/data
+
+volumes:
+  mtproto-control-data:
+    name: warp-mtproto-control-data
