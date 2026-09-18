@@ -9,12 +9,44 @@ It is intentionally separate from the Telegram bot. The bot never needs Docker s
 - `PUT /v1/users/<telegram_id>` stores/replaces one base MTProxy secret per Telegram ID;
 - `enabled=false` removes that secret from the active manifest;
 - writes `/data/active_secrets.txt` atomically, one 32-hex secret per line;
-- runs one static `MTPROTO_APPLY_COMMAND` after every change;
-- rolls the manifest/state back if the apply command fails;
-- `/health` reports controller configuration and active credential count;
+- can either execute a static apply command or wait for an external MTProxy supervisor acknowledgement;
+- rolls controller state and the manifest back when apply fails;
+- `/health` reports controller configuration, apply state and active credential count;
 - diagnostic API never returns secrets.
 
-The apply command is deployment-specific because different MTProxy Docker images manage multi-secret configuration differently. After inspecting the existing MTProto container, set the command to the exact safe reload/recreate hook for that service.
+## Recommended mode with vanitoo/telegram-mtproxy
+
+Use watch mode:
+
+```env
+MTPROTO_CONTROL_DRY_RUN=false
+MTPROTO_APPLY_MODE=watch
+MTPROTO_APPLY_ACK_FILE=/data/active_secrets.applied.sha256
+MTPROTO_APPLY_TIMEOUT_SECONDS=15
+```
+
+The controller writes:
+
+```text
+/data/active_secrets.txt
+```
+
+The MTProxy supervisor reads that file from the shared Docker volume, applies one
+`-S <secret>` argument per active secret, and then writes:
+
+```text
+/data/active_secrets.applied.sha256
+```
+
+The acknowledgement must contain the SHA-256 of the exact manifest bytes. The HTTP
+mutation returns success only after the acknowledgement matches.
+
+The Compose integration in this repository and `vanitoo/telegram-mtproxy` uses the
+same named volume:
+
+```text
+warp-mtproto-control-data
+```
 
 ## Local dry run
 
@@ -46,33 +78,29 @@ curl -sS -X PUT \
   -d '{"telegram_id":123456789,"secret":"0123456789abcdef0123456789abcdef","enabled":true}'
 ```
 
-The controller file will contain:
+## Command mode for other deployments
 
-```text
-/data/active_secrets.txt
-```
-
-with one base secret per active user.
-
-## Real apply hook
-
-Set:
+For an MTProxy deployment that has its own safe reload hook, use:
 
 ```env
-MTPROTO_CONTROL_DRY_RUN=false
+MTPROTO_APPLY_MODE=command
 MTPROTO_APPLY_COMMAND=/opt/hooks/apply-mtproxy-secrets.sh
 ```
 
-The command receives this environment variable:
+The command receives:
 
 ```text
 MTPROTO_SECRETS_FILE=/data/active_secrets.txt
 ```
 
-It must return exit code `0` only after the MTProxy process is actually serving exactly the secrets from that manifest.
+It must return exit code `0` only after the target proxy is serving the supplied
+manifest.
 
-Do not build a shell command from request data. `MTPROTO_APPLY_COMMAND` is static configuration.
+Do not build a shell command from request data. `MTPROTO_APPLY_COMMAND` is static
+configuration.
 
 ## Security
 
-Bind the controller only to localhost or a private Docker network. Always configure `MTPROTO_CONTROL_TOKEN` outside dry local development. Do not publish port 8080 publicly.
+Keep the controller only on the private Compose network. Always configure
+`MTPROTO_CONTROL_TOKEN` outside local dry-run development. Do not publish port
+8080 to the Internet.
