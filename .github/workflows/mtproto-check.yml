@@ -18,4 +18,4 @@ jobs:
       - run: python -m compileall -q app mtproto_control tests
       - run: python -c "import app.products.mtproto.storage; import app.products.mtproto.client; print('MTProto imports OK')"
       - run: python -m unittest -v tests.test_mtproto_storage tests.test_mtproto_admin_override tests.test_mtproto_secret_formats tests.test_mtproto_controller tests.test_admin_user_mutations
-      - run: docker compose config --quiet
+      - run: cp .env.example .env && docker compose config --quiet
