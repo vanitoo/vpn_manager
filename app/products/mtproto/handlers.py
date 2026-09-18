@@ -198,7 +198,9 @@ async def render_admin(message: Message) -> None:
         f"Feature: <b>{'ON' if runtime.settings.mtproto_enabled else 'OFF'}</b>\n"
         f'Controller: <b>{esc(health_text)}</b>\n'
         f'Host: <code>{esc(runtime.settings.mtproto_public_host or "-")}</code>:{runtime.settings.mtproto_public_port}\n'
-        f'Auto-create: <b>{"ON" if runtime.settings.mtproto_auto_create else "OFF"}</b>\n'
+        f'Secret mode: <b>{esc(runtime.settings.mtproto_secret_mode)}</b>\n'
+        + (f'Fake TLS: <code>{esc(runtime.settings.mtproto_fake_tls_domain)}</code>\n' if runtime.settings.mtproto_secret_mode == 'faketls' else '')
+        + f'Auto-create: <b>{"ON" if runtime.settings.mtproto_auto_create else "OFF"}</b>\n'
         'Право: <b>оплата или активный тариф «друга» с MTProto ON</b>\n'
         'Admin access: <b>always allowed for testing</b>\n\n'
         f'Активных кодов: <b>{active}</b>\n'
