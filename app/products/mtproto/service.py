@@ -237,12 +237,18 @@ async def reconcile_once(db_path: str) -> dict[str, int]:
         status = str(row.get('status') or 'disabled')
         try:
             if entitlement:
+                # Always converge the controller, even when SQLite already says
+                # active. This is important when moving from dry-run to real mode
+                # or after the controller volume is rebuilt.
+                await ensure_enabled(db_path, telegram_id)
                 if status != 'active':
-                    await ensure_enabled(db_path, telegram_id)
                     result['enabled'] += 1
-            elif status != 'disabled':
+            else:
+                # Likewise converge an already-disabled local row so stale remote
+                # controller state cannot keep an expired credential active.
                 await disable(db_path, telegram_id)
-                result['disabled'] += 1
+                if status != 'disabled':
+                    result['disabled'] += 1
         except Exception:
             result['errors'] += 1
             log.exception('MTProto reconcile failed for telegram_id=%s', telegram_id)
